@@ -80,6 +80,11 @@
                 : 'No token generated yet.';
             document.getElementById('aa-payout-url').value = data.payout_callback_url || '';
             document.getElementById('aa-payin-url').value = data.payin_callback_url || '';
+            document.getElementById('aa-webhook-secret').value = data.webhook_signing_secret_plaintext
+                || (data.webhook_signing_secret_configured ? '••••••••••••••••' : '');
+            if (data.webhook_signing_secret_plaintext) {
+                showToast('Webhook signing secret generated — copy it now, it will not be shown again.', 'success');
+            }
             renderWhitelistedIps(data.whitelisted_ips);
         }
 
@@ -108,6 +113,19 @@
             }
             document.getElementById('aa-secret-key').value = data.secret_key;
             showToast(message || 'Secret key rotated.', 'success');
+        });
+
+        document.getElementById('aa-rotate-webhook-secret').addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            setButtonLoading(btn, true);
+            const { success, data, message } = await apiFetch('/api/settings/rotate-webhook-secret.php', { method: 'POST' });
+            setButtonLoading(btn, false);
+            if (!success) {
+                showToast(message || 'Unable to rotate the webhook signing secret.', 'error');
+                return;
+            }
+            document.getElementById('aa-webhook-secret').value = data.webhook_signing_secret;
+            showToast(message || 'Webhook signing secret rotated.', 'success');
         });
 
         document.getElementById('aa-save-webhooks').addEventListener('click', async (e) => {

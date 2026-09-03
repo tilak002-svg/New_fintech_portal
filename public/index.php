@@ -56,6 +56,7 @@ $routes = [
     'admin/kyc-review' => ['pages/admin/kyc-review.php', 'KYC Review', ['admin']],
     'admin/gateways' => ['pages/admin/gateways.php', 'Payment gateways', ['admin']],
     'admin/gateways/docs' => ['pages/admin/gateway-docs.php', 'Gateway documentation', ['admin']],
+    'admin/api-integration-docs' => ['pages/admin/api-integration-docs.php', 'Customer API integration', ['admin']],
     'admin/treasury' => ['pages/admin/treasury.php', 'Treasury Node', ['admin']],
     'admin/support' => ['pages/admin/support.php', 'Support inbox', ['admin', 'operator']],
     'admin/audit-log' => ['pages/admin/audit-log.php', 'Audit log', ['admin']],

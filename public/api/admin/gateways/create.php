@@ -20,6 +20,7 @@ $name = trim((string) ($input['display_name'] ?? ''));
 $provider = $input['provider'] ?? '';
 $apiKey = trim((string) ($input['api_key'] ?? ''));
 $publicKey = trim((string) ($input['public_key'] ?? ''));
+$payoutAccountNumber = trim((string) ($input['payout_account_number'] ?? ''));
 $sandboxMode = !array_key_exists('sandbox_mode', $input) || (bool) $input['sandbox_mode'];
 
 if ($name === '' || mb_strlen($name) > 80) {
@@ -38,6 +39,9 @@ if (isset($providersNeedingPublicKey[$provider]) && $publicKey === '') {
 if (mb_strlen($publicKey) > 190) {
     json_response(false, null, 'The public identifier is too long.', 422);
 }
+if (mb_strlen($payoutAccountNumber) > 40) {
+    json_response(false, null, 'The payout account number is too long.', 422);
+}
 
 $pdo = db();
 $last4 = mb_substr($apiKey, -4);
@@ -51,10 +55,10 @@ try {
 }
 
 $stmt = $pdo->prepare(
-    'INSERT INTO payment_gateways (display_name, provider, api_key_last4, api_key_hash, api_key_encrypted, public_key, sandbox_mode, status, is_default)
-     VALUES (?, ?, ?, ?, ?, ?, ?, "inactive", 0)'
+    'INSERT INTO payment_gateways (display_name, provider, api_key_last4, api_key_hash, api_key_encrypted, public_key, payout_account_number, sandbox_mode, status, is_default)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, "inactive", 0)'
 );
-$stmt->execute([$name, $provider, $last4, $hash, $encrypted, $publicKey ?: null, $sandboxMode ? 1 : 0]);
+$stmt->execute([$name, $provider, $last4, $hash, $encrypted, $publicKey ?: null, $provider === 'razorpay' ? ($payoutAccountNumber ?: null) : null, $sandboxMode ? 1 : 0]);
 $id = (int) $pdo->lastInsertId();
 
 write_audit_log((int) $actor['id'], 'gateway_created', 'payment_gateway', $id, ['provider' => $provider, 'display_name' => $name]);

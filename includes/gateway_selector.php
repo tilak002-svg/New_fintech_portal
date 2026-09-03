@@ -41,7 +41,7 @@ const GATEWAY_AUTO_PAUSE_MINUTES = 15;
 function select_and_reserve_gateway(PDO $pdo, string $amount): array
 {
     $gatewaysStmt = $pdo->prepare(
-        'SELECT id, display_name, provider, priority, daily_limit_amount, public_key, api_key_encrypted
+        'SELECT id, display_name, provider, priority, daily_limit_amount, public_key, api_key_encrypted, payout_account_number, sandbox_mode
          FROM payment_gateways
          WHERE status = "active"
            AND (auto_paused_until IS NULL OR auto_paused_until <= UTC_TIMESTAMP())

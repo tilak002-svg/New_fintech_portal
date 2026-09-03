@@ -115,6 +115,11 @@ if (!column_exists($pdo, 'payment_gateways', 'consecutive_failures')) {
     $applied[] = 'migration7.sql (payment_gateways circuit breaker: consecutive_failures, auto_paused_until)';
 }
 
+if (!column_exists($pdo, 'payment_gateways', 'payout_account_number')) {
+    run_sql_file($pdo, __DIR__ . '/migration8.sql');
+    $applied[] = 'migration8.sql (payment_gateways.payout_account_number, customer_api_credentials.webhook_signing_secret_encrypted)';
+}
+
 if (empty($applied)) {
     echo "Database already up to date — nothing to migrate.\n";
 } else {

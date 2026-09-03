@@ -8,6 +8,9 @@
 
 require_once __DIR__ . '/money.php';
 require_once __DIR__ . '/gateway_selector.php';
+require_once __DIR__ . '/gateway_webhooks.php';
+require_once __DIR__ . '/gateway_providers/dispatch.php';
+require_once __DIR__ . '/customer_webhooks.php';
 
 function create_withdrawal(PDO $pdo, array $user, $rawAmount, $rawDestination, ?string $idempotencyKey = null): array
 {
@@ -77,7 +80,8 @@ function create_withdrawal(PDO $pdo, array $user, $rawAmount, $rawDestination, ?
             write_audit_log($user['id'], 'withdrawal_gateway_unavailable', 'transaction', null, ['amount' => $amount, 'net_amount' => $net, 'reason' => $selection['reason']]);
             return ['ok' => false, 'status_code' => 503, 'message' => 'Withdrawals are temporarily unavailable. Please try again shortly.', 'data' => null];
         }
-        $gatewayId = (int) $selection['gateway']['id'];
+        $gateway = $selection['gateway'];
+        $gatewayId = (int) $gateway['id'];
 
         $insert = $pdo->prepare(
             'INSERT INTO transactions (user_id, type, method, amount, fee, net_amount, currency, status, reference, destination, gateway_id, idempotency_key)
@@ -102,10 +106,103 @@ function create_withdrawal(PDO $pdo, array $user, $rawAmount, $rawDestination, ?
 
     write_audit_log($user['id'], 'withdrawal_created', 'transaction', $txnId, ['amount' => $amount, 'destination' => $destination, 'gateway_id' => $gatewayId]);
 
+    // The outbound call to the provider happens only now, after the DB
+    // transaction has committed — never make a network call while holding
+    // the wallet/usage row locks above. Mirrors deposit_service.php's
+    // create_deposit() — see that function for why each exception type is
+    // handled the way it is.
+    $message = 'Withdrawal submitted and pending settlement.';
+
+    if (gateway_supports_live_payout($gateway)) {
+        $bankStmt = $pdo->prepare('SELECT account_holder, account_number, ifsc_code FROM settlement_banks WHERE user_id = ?');
+        $bankStmt->execute([$user['id']]);
+        $bank = $bankStmt->fetch();
+
+        $profileStmt = $pdo->prepare('SELECT mobile_number, office_address FROM business_profiles WHERE user_id = ?');
+        $profileStmt->execute([$user['id']]);
+        $profile = $profileStmt->fetch() ?: [];
+
+        if (!$bank) {
+            // No money has moved and nothing was reserved beyond the
+            // in-app hold — safe to unwind immediately, same as a
+            // synchronous provider rejection below.
+            $pdo->beginTransaction();
+            try {
+                $txnLock = $pdo->prepare('SELECT id, user_id, type, status, amount, fee, net_amount, gateway_id FROM transactions WHERE id = ? FOR UPDATE');
+                $txnLock->execute([$txnId]);
+                $txnRow = $txnLock->fetch();
+                if ($txnRow && $txnRow['status'] === 'pending') {
+                    apply_transaction_outcome($pdo, $txnRow, 'failed', null);
+                    release_gateway_reservation($pdo, $gatewayId, $net);
+                    $pdo->commit();
+                    dispatch_customer_transaction_webhook($pdo, array_merge($txnRow, ['status' => 'failed', 'reference' => $reference, 'currency' => 'INR']));
+                } else {
+                    $pdo->commit();
+                }
+            } catch (Throwable $e2) {
+                $pdo->rollBack();
+                error_log('[create_withdrawal] failed to unwind missing-bank-details failure: ' . $e2->getMessage());
+            }
+
+            return [
+                'ok' => false,
+                'status_code' => 422,
+                'message' => 'Add your bank account details in Settings before requesting a withdrawal.',
+                'data' => ['reference' => $reference],
+            ];
+        }
+
+        try {
+            $payoutResult = create_gateway_payout($gateway, $reference, $amount, $bank, $user, $profile['mobile_number'] ?? null, $profile['office_address'] ?? null);
+            $pdo->prepare('UPDATE transactions SET gateway_txn_id = ? WHERE id = ?')->execute([$payoutResult['gateway_txn_id'], $txnId]);
+            $message = 'Your withdrawal is being processed by the payment gateway.';
+        } catch (GatewayOrderAmbiguousException $e) {
+            // We do not know if the provider actually created the payout —
+            // never auto-retry on a different gateway here. The
+            // transaction stays pending with no payout id; only a webhook
+            // (or manual admin reconciliation) can resolve it from here.
+            error_log('[create_withdrawal] gateway payout ambiguous: ' . $e->getMessage());
+            write_audit_log($user['id'], 'withdrawal_gateway_payout_ambiguous', 'transaction', $txnId, ['gateway_id' => $gatewayId, 'provider' => $gateway['provider'], 'reason' => $e->getMessage()]);
+            $message = 'Withdrawal submitted, but we could not confirm the payment gateway accepted it yet. This will update automatically once confirmed.';
+        } catch (Throwable $e) {
+            // A definite, synchronous rejection — safe to unwind the
+            // reservation and mark this attempt failed, same as deposits.
+            $isCustomerActionable = $e instanceof GatewayCustomerActionRequiredException;
+
+            error_log('[create_withdrawal] gateway payout failed: ' . $e->getMessage());
+            write_audit_log($user['id'], 'withdrawal_gateway_payout_failed', 'transaction', $txnId, ['gateway_id' => $gatewayId, 'provider' => $gateway['provider'], 'reason' => $e->getMessage()]);
+
+            $pdo->beginTransaction();
+            try {
+                $txnLock = $pdo->prepare('SELECT id, user_id, type, status, amount, fee, net_amount, gateway_id FROM transactions WHERE id = ? FOR UPDATE');
+                $txnLock->execute([$txnId]);
+                $txnRow = $txnLock->fetch();
+                if ($txnRow && $txnRow['status'] === 'pending') {
+                    apply_transaction_outcome($pdo, $txnRow, 'failed', null);
+                    release_gateway_reservation($pdo, $gatewayId, $net);
+                    $pdo->commit();
+                    dispatch_customer_transaction_webhook($pdo, array_merge($txnRow, ['status' => 'failed', 'reference' => $reference, 'currency' => 'INR']));
+                } else {
+                    $pdo->commit();
+                }
+            } catch (Throwable $e2) {
+                $pdo->rollBack();
+                error_log('[create_withdrawal] failed to unwind gateway payout failure: ' . $e2->getMessage());
+            }
+
+            return [
+                'ok' => false,
+                'status_code' => $isCustomerActionable ? 422 : 502,
+                'message' => $isCustomerActionable ? $e->getMessage() : 'This withdrawal could not be started — the payment gateway rejected the request. Please try again.',
+                'data' => ['reference' => $reference],
+            ];
+        }
+    }
+
     return [
         'ok' => true,
         'status_code' => 200,
-        'message' => 'Withdrawal submitted.',
+        'message' => $message,
         'data' => [
             'reference' => $reference,
             'status' => 'pending',

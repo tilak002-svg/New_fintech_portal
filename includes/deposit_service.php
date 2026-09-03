@@ -16,6 +16,7 @@ require_once __DIR__ . '/money.php';
 require_once __DIR__ . '/gateway_selector.php';
 require_once __DIR__ . '/gateway_webhooks.php';
 require_once __DIR__ . '/gateway_providers/dispatch.php';
+require_once __DIR__ . '/customer_webhooks.php';
 
 function create_deposit(PDO $pdo, array $user, $rawAmount, $rawMethod, ?string $idempotencyKey = null): array
 {
@@ -166,8 +167,11 @@ function create_deposit(PDO $pdo, array $user, $rawAmount, $rawMethod, ?string $
                 if ($txnRow && $txnRow['status'] === 'pending') {
                     apply_transaction_outcome($pdo, $txnRow, 'failed', null);
                     release_gateway_reservation($pdo, $gatewayId, $amount);
+                    $pdo->commit();
+                    dispatch_customer_transaction_webhook($pdo, array_merge($txnRow, ['status' => 'failed', 'reference' => $reference, 'currency' => 'INR']));
+                } else {
+                    $pdo->commit();
                 }
-                $pdo->commit();
             } catch (Throwable $e2) {
                 $pdo->rollBack();
                 error_log('[create_deposit] failed to unwind gateway order failure: ' . $e2->getMessage());

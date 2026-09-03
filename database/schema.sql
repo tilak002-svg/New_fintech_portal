@@ -59,6 +59,33 @@ CREATE TABLE business_profiles (
     CONSTRAINT fk_business_profiles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE payment_gateways (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    display_name VARCHAR(80) NOT NULL,
+    provider VARCHAR(40) NOT NULL,
+    api_key_last4 CHAR(4) NOT NULL,
+    api_key_hash VARCHAR(255) NOT NULL,
+    api_key_encrypted TEXT NULL,
+    webhook_secret_encrypted TEXT NULL,
+    public_key VARCHAR(190) NULL,
+    -- RazorpayX payout source account number (the current account payouts are
+    -- debited from) - distinct from public_key/api_key_encrypted, which for
+    -- Razorpay already double as both Orders API and Payouts API auth. Only
+    -- meaningful for provider = 'razorpay'; NULL means this gateway isn't
+    -- configured for live payouts even if it does live pay-ins.
+    payout_account_number VARCHAR(40) NULL,
+    sandbox_mode TINYINT(1) NOT NULL DEFAULT 1,
+    consecutive_failures INT UNSIGNED NOT NULL DEFAULT 0,
+    auto_paused_until DATETIME NULL,
+    status ENUM('active', 'inactive') NOT NULL DEFAULT 'inactive',
+    is_default TINYINT(1) NOT NULL DEFAULT 0,
+    priority INT UNSIGNED NOT NULL DEFAULT 100,
+    daily_limit_amount DECIMAL(18,2) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_payment_gateways_priority (status, priority)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE transactions (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id INT UNSIGNED NOT NULL,
@@ -120,27 +147,6 @@ CREATE TABLE notifications (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_notifications_user (user_id, is_read, created_at),
     CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE payment_gateways (
-    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    display_name VARCHAR(80) NOT NULL,
-    provider VARCHAR(40) NOT NULL,
-    api_key_last4 CHAR(4) NOT NULL,
-    api_key_hash VARCHAR(255) NOT NULL,
-    api_key_encrypted TEXT NULL,
-    webhook_secret_encrypted TEXT NULL,
-    public_key VARCHAR(190) NULL,
-    sandbox_mode TINYINT(1) NOT NULL DEFAULT 1,
-    consecutive_failures INT UNSIGNED NOT NULL DEFAULT 0,
-    auto_paused_until DATETIME NULL,
-    status ENUM('active', 'inactive') NOT NULL DEFAULT 'inactive',
-    is_default TINYINT(1) NOT NULL DEFAULT 0,
-    priority INT UNSIGNED NOT NULL DEFAULT 100,
-    daily_limit_amount DECIMAL(18,2) NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    KEY idx_payment_gateways_priority (status, priority)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Per-gateway, per-day usage counter. One row per (gateway, day), created
@@ -271,6 +277,15 @@ CREATE TABLE customer_api_credentials (
     bearer_token_generated_at DATETIME NULL,
     payout_callback_url VARCHAR(255) NULL,
     payin_callback_url VARCHAR(255) NULL,
+    -- Signs outbound deliveries to payin_callback_url/payout_callback_url
+    -- (X-Verapay-Signature) so the customer's receiver can verify a webhook
+    -- really came from Verapay. Deliberately separate from secret_key_hash
+    -- above: that one is one-way (a login-style credential checked with
+    -- password_verify()) and can never be turned back into something usable
+    -- for HMAC signing. Encrypted at rest the same way gateway secrets are
+    -- (see includes/gateway_secrets.php) since, unlike secret_key, this one
+    -- genuinely needs to be decrypted server-side on every outbound delivery.
+    webhook_signing_secret_encrypted TEXT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_customer_api_credentials_user (user_id),

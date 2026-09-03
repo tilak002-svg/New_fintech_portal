@@ -19,6 +19,7 @@
 
 require_once __DIR__ . '/money.php';
 require_once __DIR__ . '/gateway_selector.php';
+require_once __DIR__ . '/customer_webhooks.php';
 
 function verify_generic_webhook_signature(string $rawBody, string $signatureHeader, string $secret): bool
 {
@@ -78,13 +79,13 @@ function process_gateway_webhook(PDO $pdo, int $gatewayId, array $payload): arra
 
         if ($reference !== '') {
             $txnStmt = $pdo->prepare(
-                'SELECT id, user_id, type, status, amount, fee, net_amount, gateway_id
+                'SELECT id, user_id, type, status, amount, fee, net_amount, currency, reference, gateway_id
                  FROM transactions WHERE reference = ? FOR UPDATE'
             );
             $txnStmt->execute([$reference]);
         } else {
             $txnStmt = $pdo->prepare(
-                'SELECT id, user_id, type, status, amount, fee, net_amount, gateway_id
+                'SELECT id, user_id, type, status, amount, fee, net_amount, currency, reference, gateway_id
                  FROM transactions WHERE gateway_txn_id = ? AND gateway_id = ? FOR UPDATE'
             );
             $txnStmt->execute([$gatewayTxnId, $gatewayId]);
@@ -120,6 +121,12 @@ function process_gateway_webhook(PDO $pdo, int $gatewayId, array $payload): arra
         ]);
 
         $pdo->commit();
+
+        // Never call out to a customer's server while holding the
+        // transaction/wallet row locks above — same rule
+        // deposit_service.php follows for its own outbound calls.
+        dispatch_customer_transaction_webhook($pdo, array_merge($transaction, ['status' => $status]));
+
         return ['status' => 200, 'message' => "Transaction marked {$status}."];
     } catch (Throwable $e) {
         $pdo->rollBack();

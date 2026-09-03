@@ -130,6 +130,23 @@ render_hero_banner(
                 </p>
             </div>
 
+            <div id="ag-payout-account-field" class="hidden">
+                <label for="ag-payout-account" class="field-label">
+                    RazorpayX payout account number
+                </label>
+
+                <input type="text"
+                       id="ag-payout-account"
+                       class="field-input font-mono"
+                       placeholder="e.g. 7878780080316316"
+                       autocomplete="off"
+                       spellcheck="false">
+
+                <p class="field-help">
+                    The RazorpayX current account payouts are debited from — required only if this gateway should also process withdrawals, not needed for pay-ins alone. Found on the RazorpayX dashboard, distinct from the beneficiary's own bank account.
+                </p>
+            </div>
+
             <div id="ag-sandbox-field" class="hidden">
                 <label class="flex items-center gap-2.5 cursor-pointer">
                     <input type="checkbox" id="ag-sandbox-mode" class="rounded" checked>
@@ -217,6 +234,23 @@ render_hero_banner(
 
                 <p class="field-help">
                     This provider issues its public identifier and secret as a pair — update both together when regenerating. Leave blank to keep the current one.
+                </p>
+            </div>
+
+            <div id="rk-payout-account-field" class="hidden">
+                <label for="rk-payout-account" class="field-label">
+                    RazorpayX payout account number
+                </label>
+
+                <input type="text"
+                       id="rk-payout-account"
+                       class="field-input font-mono"
+                       placeholder="e.g. 7878780080316316"
+                       autocomplete="off"
+                       spellcheck="false">
+
+                <p class="field-help">
+                    Leave blank to keep the current one.
                 </p>
             </div>
 

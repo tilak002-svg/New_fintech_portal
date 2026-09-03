@@ -56,6 +56,7 @@
     const agPublicKeyLabel = document.getElementById('ag-public-key-label');
     const agPublicKeyInput = document.getElementById('ag-public-key');
     const agSandboxField = document.getElementById('ag-sandbox-field');
+    const agPayoutAccountField = document.getElementById('ag-payout-account-field');
 
     function syncPublicKeyRequirement() {
         const provider = agProviderSelect.value;
@@ -64,6 +65,7 @@
         agPublicKeyInput.required = needsPublicKey;
         agPublicKeyLabel.textContent = livePublicKeyLabels[provider] || 'Key ID';
         agSandboxField.classList.toggle('hidden', !sandboxAwareProviders.includes(provider));
+        agPayoutAccountField.classList.toggle('hidden', provider !== 'razorpay');
     }
     agProviderSelect.addEventListener('change', syncPublicKeyRequirement);
     syncPublicKeyRequirement();
@@ -157,7 +159,7 @@
                 <td>
                     ${escapeHtml(providerNames[g.provider] || g.provider)}
                     ${g.live_integration
-                        ? `<span class="block text-xs text-text-secondary mt-0.5">${g.sandbox_mode ? 'Sandbox' : 'Live'}</span>`
+                        ? `<span class="block text-xs text-text-secondary mt-0.5">${g.sandbox_mode ? 'Sandbox' : 'Live'} · ${g.live_payout ? 'pay-in + payout' : 'pay-in only'}</span>`
                         : ''}
                 </td>
 
@@ -373,6 +375,10 @@
                 document.getElementById('rk-public-key-label').textContent =
                     `New ${livePublicKeyLabels[provider] || 'Key ID'}`;
 
+                document.getElementById('rk-payout-account').value = '';
+                document.getElementById('rk-payout-account-field')
+                    .classList.toggle('hidden', provider !== 'razorpay');
+
                 document.getElementById('rk-sandbox-field')
                     .classList.toggle('hidden', !sandboxAwareProviders.includes(provider));
                 document.getElementById('rk-sandbox-mode').checked =
@@ -473,6 +479,11 @@
                             .value
                             .trim(),
 
+                        payout_account_number: document
+                            .getElementById('ag-payout-account')
+                            .value
+                            .trim(),
+
                         sandbox_mode: document
                             .getElementById('ag-sandbox-mode')
                             .checked
@@ -530,6 +541,11 @@
 
                         public_key: document
                             .getElementById('rk-public-key')
+                            .value
+                            .trim(),
+
+                        payout_account_number: document
+                            .getElementById('rk-payout-account')
                             .value
                             .trim(),
 

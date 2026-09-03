@@ -18,6 +18,7 @@ $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 $id = (int) ($input['id'] ?? 0);
 $apiKey = trim((string) ($input['api_key'] ?? ''));
 $publicKey = trim((string) ($input['public_key'] ?? ''));
+$payoutAccountNumber = trim((string) ($input['payout_account_number'] ?? ''));
 $sandboxModeProvided = array_key_exists('sandbox_mode', $input);
 $sandboxMode = $sandboxModeProvided && (bool) $input['sandbox_mode'];
 
@@ -29,6 +30,9 @@ if (mb_strlen($apiKey) < 8) {
 }
 if (mb_strlen($publicKey) > 190) {
     json_response(false, null, 'The public identifier is too long.', 422);
+}
+if (mb_strlen($payoutAccountNumber) > 40) {
+    json_response(false, null, 'The payout account number is too long.', 422);
 }
 
 $pdo = db();
@@ -60,9 +64,10 @@ $pdo->prepare(
     'UPDATE payment_gateways
      SET api_key_last4 = ?, api_key_hash = ?, api_key_encrypted = ?,
          public_key = COALESCE(NULLIF(?, ""), public_key),
+         payout_account_number = COALESCE(NULLIF(?, ""), payout_account_number),
          sandbox_mode = CASE WHEN ? THEN ? ELSE sandbox_mode END
      WHERE id = ?'
-)->execute([$last4, $hash, $encrypted, $publicKey, $sandboxModeProvided ? 1 : 0, $sandboxMode ? 1 : 0, $id]);
+)->execute([$last4, $hash, $encrypted, $publicKey, $payoutAccountNumber, $sandboxModeProvided ? 1 : 0, $sandboxMode ? 1 : 0, $id]);
 
 write_audit_log((int) $actor['id'], 'gateway_key_rotated', 'payment_gateway', $id, []);
 

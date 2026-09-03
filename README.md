@@ -175,7 +175,7 @@ See `database/schema.sql` for full DDL. Summary:
 - **transactions** — unified deposit/withdrawal ledger (`type` column); Deposits and Withdrawals pages are filtered views of this table
 - **support_conversations** / **support_messages** — persisted chat, shared between customer and operator views
 - **notifications** — per-user, `is_read` flag
-- **payment_gateways** — configured processors; only a one-way hash + last 4 characters of each API key are ever stored
+- **payment_gateways** — configured processors; each API key is stored both as a one-way hash (display only, last 4 characters shown) and AES-256-GCM encrypted (reversible, for real outbound calls — see `includes/gateway_secrets.php`). Razorpay/Cashfree gateways with credentials set place real orders/payouts at the provider; see `includes/gateway_providers/`
 - **audit_logs** — actor, action, target, metadata, IP, timestamp
 - **login_attempts** — backs login rate limiting
 
@@ -201,8 +201,8 @@ All endpoints return `{ "success": bool, "data": ..., "message": "..." }`. Mutat
 | `/api/auth/logout.php` | POST | |
 | `/api/dashboard/summary.php` | GET | Scoped to caller; admins/operators get platform-wide figures |
 | `/api/wallet/summary.php` | GET | Customer only |
-| `/api/deposits/create.php` | POST | Customer only. Server recalculates fee/net amount — never trusts client math |
-| `/api/withdrawals/create.php` | POST | Customer only. Row-locks the wallet, rejects amount+fee > available balance |
+| `/api/deposits/create.php` | POST | Customer only (session or bearer token). Server recalculates fee/net amount — never trusts client math. Places a real order at the gateway's provider (Razorpay/Cashfree) when one is configured |
+| `/api/withdrawals/create.php` | POST | Customer only (session or bearer token). Row-locks the wallet, rejects amount+fee > available balance. Places a real payout at the gateway's provider when one is configured |
 | `/api/transactions/list.php` | GET | Filters: `type`, `status`, `from`, `to`, `search`, `sort`, `page`, `per_page` |
 | `/api/support/conversations.php` | GET/POST | GET scoped to caller (or all, for staff); POST creates a conversation (customer) |
 | `/api/support/messages.php` | GET/POST | `conversation_id` ownership enforced server-side (IDOR guard) |
@@ -214,11 +214,26 @@ All endpoints return `{ "success": bool, "data": ..., "message": "..." }`. Mutat
 | `/api/profile/update.php` | POST | |
 | `/api/settings/change-password.php` | POST | Requires current password |
 | `/api/admin/gateways/list.php` | GET | Admin only |
-| `/api/admin/gateways/create.php` | POST | Admin only. Stores a hash + last 4 chars only, never the full key |
+| `/api/admin/gateways/create.php` | POST | Admin only. Full key never returned again after this call — only a display hash + last 4 chars |
 | `/api/admin/gateways/update-status.php` | POST | Admin only. Blocks deactivating the current default |
 | `/api/admin/gateways/set-default.php` | POST | Admin only. Must already be active |
 | `/api/admin/gateways/rotate-key.php` | POST | Admin only |
 | `/api/admin/gateways/delete.php` | POST | Admin only. Blocks deleting the current default |
+| `/api/admin/gateways/set-webhook-secret.php` | POST | Admin only. Inbound provider webhook signing secret |
+| `/api/webhooks/razorpay.php` | POST | Public (provider-authenticated via signature, not a session). `?gateway_id=` |
+| `/api/webhooks/cashfree.php` | POST | Public (provider-authenticated via signature). `?gateway_id=` |
+| `/api/webhooks/gateway.php` | POST | Public. Generic fallback receiver — placeholder signature scheme, see `includes/gateway_webhooks.php` |
+| `/api/admin/users/api-ips.php` | GET | Admin only. A customer's API credentials + IP whitelist |
+| `/api/admin/users/add-api-ip.php` | POST | Admin only |
+| `/api/admin/users/remove-api-ip.php` | POST | Admin only |
+| `/api/auth/api-token.php` | POST | Public (client_key/secret_key authenticated). Exchanges credentials for a bearer token; IP-whitelist-gated |
+| `/api/settings/api-credentials.php` | GET | Customer only. Auto-provisions client_key/secret_key and a webhook signing secret on first load |
+| `/api/settings/rotate-api-secret.php` | POST | Customer only |
+| `/api/settings/rotate-webhook-secret.php` | POST | Customer only. Signs outbound deliveries to the callback URLs below |
+| `/api/settings/generate-api-token.php` | POST | Customer only |
+| `/api/settings/save-api-webhooks.php` | POST | Customer only. Sets `payin_callback_url`/`payout_callback_url` |
+
+Full customer-integration walkthrough (auth exchange, pay-in/payout, outbound webhook payload + signature verification): in-app at **Admin → Payment gateways → Customer API docs** (`/admin/api-integration-docs`).
 
 ## 12. What's been tested
 

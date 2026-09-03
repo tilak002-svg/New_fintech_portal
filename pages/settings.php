@@ -89,6 +89,17 @@ render_hero_banner($user, 'Account security', 'Manage your password and account 
         </div>
         <p id="aa-webhook-error" class="field-error hidden"></p>
         <button type="button" id="aa-save-webhooks" class="btn-primary"><?= icon('upload', 'w-4 h-4') ?> Save webhook URLs</button>
+
+        <div class="pt-4 border-t border-border">
+            <label class="field-label">Webhook signing secret</label>
+            <div class="flex gap-2">
+                <input type="text" id="aa-webhook-secret" class="field-input font-mono flex-1" readonly>
+                <button type="button" id="aa-rotate-webhook-secret" class="btn-secondary shrink-0">Rotate</button>
+            </div>
+            <p class="field-help">
+                Only ever shown in full right after rotating. Verify each delivery to your callback URLs above by recomputing <code class="font-mono text-xs">hex(HMAC_SHA256(raw_request_body, this_secret))</code> and comparing it to the <code class="font-mono text-xs">X-Verapay-Signature</code> header — reject anything that doesn't match.
+            </p>
+        </div>
     </div>
 </div>
 <?php endif; ?>

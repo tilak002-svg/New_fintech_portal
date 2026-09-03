@@ -9,6 +9,7 @@
 require_once __DIR__ . '/../../../config/database.php';
 require_once __DIR__ . '/../../../includes/auth.php';
 require_once __DIR__ . '/../../../includes/functions.php';
+require_once __DIR__ . '/../../../includes/gateway_secrets.php';
 
 $user = api_guard(['customer']);
 
@@ -43,6 +44,28 @@ if (!$creds) {
     $creds = $stmt->fetch();
 }
 
+// Lazily backfills a webhook signing secret for accounts provisioned
+// before this existed — same one-time-reveal convention as secret_key
+// above, just triggered by "never generated yet" instead of "never
+// provisioned yet". See includes/customer_webhooks.php for how this
+// signs outbound deliveries to payin_callback_url/payout_callback_url.
+$webhookSecretPlaintext = null;
+if (!$creds['webhook_signing_secret_encrypted']) {
+    $webhookSecretPlaintext = bin2hex(random_bytes(24));
+    try {
+        $encrypted = gateway_encrypt_secret($webhookSecretPlaintext);
+    } catch (Throwable $e) {
+        error_log('[settings/api-credentials] ' . $e->getMessage());
+        $encrypted = null;
+        $webhookSecretPlaintext = null;
+    }
+    if ($encrypted !== null) {
+        $pdo->prepare('UPDATE customer_api_credentials SET webhook_signing_secret_encrypted = ? WHERE user_id = ?')
+            ->execute([$encrypted, $user['id']]);
+        write_audit_log((int) $user['id'], 'api_webhook_secret_provisioned', 'user', (int) $user['id'], []);
+    }
+}
+
 $ipsStmt = $pdo->prepare('SELECT ip_address, created_at FROM customer_whitelisted_ips WHERE user_id = ? ORDER BY created_at ASC');
 $ipsStmt->execute([$user['id']]);
 
@@ -54,5 +77,7 @@ json_response(true, [
     'bearer_token_generated_at' => $creds['bearer_token_generated_at'],
     'payout_callback_url' => $creds['payout_callback_url'],
     'payin_callback_url' => $creds['payin_callback_url'],
+    'webhook_signing_secret_configured' => $webhookSecretPlaintext !== null || !empty($creds['webhook_signing_secret_encrypted']),
+    'webhook_signing_secret_plaintext' => $webhookSecretPlaintext,
     'whitelisted_ips' => $ipsStmt->fetchAll(),
 ], 'ok');

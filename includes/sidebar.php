@@ -22,7 +22,8 @@ $adminNav = [
     ['admin/users', 'users', 'Customers'],
     ['admin/gateways', 'gateway', 'Payment gateways', [
         ['admin/gateways', 'gateway', 'Manage gateways'],
-        ['admin/gateways/docs', 'documentation', 'Documentation'],
+        ['admin/gateways/docs', 'documentation', 'Gateway API docs'],
+        ['admin/api-integration-docs', 'documentation', 'Customer API docs'],
         ['admin/treasury', 'treasury', 'Treasury Node'],
     ]],
     ['admin/support', 'support', 'Support inbox'],
