@@ -86,9 +86,9 @@ try {
 
     $userStmt = $pdo->prepare(
         'INSERT INTO users
-            (name, email, password_hash, role, status, avatar_initials, gender)
+            (name, email, password_hash, role, status, must_change_password, avatar_initials, gender)
          VALUES
-            (?, ?, ?, "customer", "active", ?, ?)'
+            (?, ?, ?, "customer", "active", 0, ?, ?)'
     );
 
     $userStmt->execute([

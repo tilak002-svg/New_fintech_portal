@@ -344,6 +344,11 @@
 
         closeModal('add-customer-modal');
 
+        document.getElementById('cr-login-url').value = window.location.origin + '/login';
+        document.getElementById('cr-email').value = email;
+        document.getElementById('cr-password').value = password;
+        openModal('credentials-reveal-modal');
+
         addCustomerForm.reset();
 
         showToast(
@@ -352,6 +357,44 @@
         );
 
         load(1);
+    });
+
+    // Per-field copy buttons + "copy all" in the post-creation credentials
+    // reveal modal — same visual pattern as .aa-copy-btn on the API Access
+    // page, scoped to this modal's own fields.
+    document.querySelectorAll('.cr-copy-btn').forEach((btn) => {
+        const defaultIcon = btn.querySelector('.cr-copy-icon-default');
+        const copiedIcon = btn.querySelector('.cr-copy-icon-copied');
+        btn.addEventListener('click', async () => {
+            const target = document.getElementById(btn.dataset.copyTarget);
+            if (!target || !target.value) return;
+            try {
+                await navigator.clipboard.writeText(target.value);
+            } catch (err) {
+                showToast('Unable to copy — your browser blocked clipboard access.', 'error');
+                return;
+            }
+            defaultIcon?.classList.add('hidden');
+            copiedIcon?.classList.remove('hidden');
+            setTimeout(() => {
+                defaultIcon?.classList.remove('hidden');
+                copiedIcon?.classList.add('hidden');
+            }, 1800);
+        });
+    });
+
+    document.getElementById('cr-copy-all')?.addEventListener('click', async () => {
+        const text = [
+            `Login URL: ${document.getElementById('cr-login-url').value}`,
+            `Email: ${document.getElementById('cr-email').value}`,
+            `Temporary password: ${document.getElementById('cr-password').value}`,
+        ].join('\n');
+        try {
+            await navigator.clipboard.writeText(text);
+            showToast('Copied to clipboard.', 'success');
+        } catch (err) {
+            showToast('Unable to copy — your browser blocked clipboard access.', 'error');
+        }
     });
 
     document

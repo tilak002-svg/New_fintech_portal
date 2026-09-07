@@ -9,7 +9,7 @@ render_hero_banner(
 );
 ?>
 <div class="mb-6 flex justify-end">
-    <a href="#" id="treasury-download" class="btn-primary shrink-0"><?= icon('download', 'w-4 h-4') ?>Download report</a>
+    <a href="#" id="treasury-download" class="btn-secondary shrink-0"><?= icon('download', 'w-4 h-4') ?>Download report</a>
 </div>
 <div class="card mb-5">
     <form id="treasury-filters" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
@@ -57,9 +57,9 @@ render_hero_banner(
                     <th scope="col">Merchant name</th>
                     <th scope="col">Service type</th>
                     <th scope="col">Transaction ID</th>
-                    <th scope="col">Credit (+)</th>
-                    <th scope="col">Debit (-)</th>
-                    <th scope="col">Net balance</th>
+                    <th scope="col" class="text-right">Credit (+)</th>
+                    <th scope="col" class="text-right">Debit (-)</th>
+                    <th scope="col" class="text-right">Net balance</th>
                     <th scope="col">Status</th>
                 </tr>
             </thead>

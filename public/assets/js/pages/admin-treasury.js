@@ -89,9 +89,9 @@
                     </span>
                 </td>
                 <td class="font-mono text-sm">${escapeHtml(row.reference)}</td>
-                <td class="text-success">${row.type === 'deposit' ? money(row.amount) : '—'}</td>
-                <td class="text-danger">${row.type === 'withdrawal' ? money(row.amount) : '—'}</td>
-                <td class="font-medium">${money(row.running_balance)}</td>
+                <td class="table-amount text-success">${row.type === 'deposit' ? money(row.amount) : '—'}</td>
+                <td class="table-amount text-danger">${row.type === 'withdrawal' ? money(row.amount) : '—'}</td>
+                <td class="table-amount font-medium">${money(row.running_balance)}</td>
                 <td><span class="${statusBadgeClass(row.status)}">${escapeHtml(row.status)}</span></td>
             </tr>`).join('');
 

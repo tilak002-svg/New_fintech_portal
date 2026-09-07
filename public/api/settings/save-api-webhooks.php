@@ -18,7 +18,20 @@ $validateUrl = static function (string $url, string $label): void {
     if ($url === '') {
         return;
     }
-    if (!filter_var($url, FILTER_VALIDATE_URL) || !str_starts_with($url, 'https://')) {
+    if (!filter_var($url, FILTER_VALIDATE_URL)) {
+        json_response(false, null, "Enter a valid URL for {$label}.", 422);
+    }
+    if (str_starts_with($url, 'https://')) {
+        return;
+    }
+    // http:// is only ever accepted outside production, and only for a
+    // loopback-ish host — this exists purely so a local receiver (this
+    // container, localhost, a Docker Desktop host) can be exercised for the
+    // local PayIn/PayOut E2E test; a real customer callback URL must be
+    // HTTPS, since the delivery carries an HMAC-signed payload.
+    $host = parse_url($url, PHP_URL_HOST) ?: '';
+    $isLoopbackHost = in_array($host, ['localhost', '127.0.0.1', '::1', 'host.docker.internal'], true);
+    if (APP_ENV === 'production' || !str_starts_with($url, 'http://') || !$isLoopbackHost) {
         json_response(false, null, "Enter a valid https:// URL for {$label}.", 422);
     }
 };

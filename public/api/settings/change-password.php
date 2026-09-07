@@ -32,7 +32,7 @@ if (password_verify($new, $hash)) {
     json_response(false, null, 'New password must be different from your current password.', 422);
 }
 
-$pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?')->execute([password_hash($new, PASSWORD_DEFAULT), $user['id']]);
+$pdo->prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?')->execute([password_hash($new, PASSWORD_DEFAULT), $user['id']]);
 write_audit_log((int) $user['id'], 'password_changed', 'user', (int) $user['id'], []);
 
 json_response(true, null, 'Password updated.');

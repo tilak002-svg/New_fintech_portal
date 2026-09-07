@@ -64,13 +64,14 @@ render_hero_banner(
                     <th scope="col">Reference</th>
                     <th scope="col">Type</th>
                     <th scope="col">Method</th>
-                    <th scope="col">Amount</th>
+                    <th scope="col" class="text-right">Amount</th>
                     <th scope="col">Status</th>
                     <th scope="col">Date</th>
+                    <th scope="col"><span class="sr-only">Actions</span></th>
                 </tr>
             </thead>
             <tbody id="txn-tbody">
-                <tr><td colspan="7" class="text-center py-8 text-text-secondary">Loading transactions…</td></tr>
+                <tr><td colspan="8" class="text-center py-8 text-text-secondary">Loading transactions…</td></tr>
             </tbody>
         </table>
     </div>

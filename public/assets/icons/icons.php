@@ -42,8 +42,26 @@ function icon(string $name, string $class = 'w-5 h-5'): string
         'treasury' => '<rect x="3" y="4.5" width="18" height="15" rx="2"/><circle cx="12" cy="12" r="4"/><path d="M12 9.8V12l1.6 1"/><path d="M3 9h2.2M3 15h2.2M18.8 9H21M18.8 15H21"/>',
         'documentation' => '<path d="M7 3.5h7L18 7v13.5H7Z"/><path d="M14 3.5V7h4"/><path d="M9.5 12h5M9.5 15.5h5"/>',
         'inbox' => '<path d="M4 12h4l2 3h4l2-3h4"/><path d="M5.5 5h13L21 12v6a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18v-6Z"/>',
+        'calendar' => '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M8 3v3M16 3v3"/>',
+        'circle' => '<circle cx="12" cy="12" r="8"/>',
+        'copy' => '<rect x="8.5" y="8.5" width="12" height="12" rx="1.5"/><path d="M15.5 8.5V5.5A1.5 1.5 0 0 0 14 4H5.5A1.5 1.5 0 0 0 4 5.5V14a1.5 1.5 0 0 0 1.5 1.5h3"/>',
     ];
 
     $path = $paths[$name] ?? $paths['alert-circle'];
     return "<svg class=\"{$class}\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\">{$path}</svg>";
+}
+
+/**
+ * The Verapay mark: the supplied navy-to-cyan "V" wordmark icon
+ * (public/assets/images/logo-mark.png), background removed. It's a
+ * two-tone gradient asset, not a flat currentColor icon like icon()
+ * above, so it can't sit directly on brand-blue chrome — its own navy
+ * tone loses contrast there. Callers on a brand-blue ground must wrap it
+ * in a light/white plate; on dark or light neutral surfaces it can sit
+ * directly. $class sizes it (a height + w-auto is usually right, since
+ * the source art is wider than it is tall).
+ */
+function brand_mark(string $class = 'h-6 w-auto'): string
+{
+    return "<img src=\"/assets/images/logo-mark.png\" alt=\"\" class=\"{$class} object-contain\">";
 }

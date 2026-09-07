@@ -39,19 +39,53 @@ if ($route === 'suspended') {
     exit;
 }
 
+// Hosted PayIn checkout — reached by a merchant's END-CUSTOMER, who has no
+// Verapay account. Gated entirely by the unguessable ?session= token, not
+// by auth. See includes/payin_service.php / database's payment_sessions.
+if ($route === 'pay') {
+    require __DIR__ . '/../pages/pay-checkout.php';
+    exit;
+}
+
+// Extension-less aliases for every API endpoint (see pages/api-docs.php) —
+// a real integrator shouldn't see ".php" in a path they're told to call.
+// Requesting the file directly (…/create.php) still works too, served as a
+// real file before this front controller ever runs; this is purely an
+// additive alias, not a replacement. Each such endpoint fully guards itself
+// (api_guard()/require_auth()) exactly as if reached via its own URL, so
+// this dispatch is a plain include, deliberately bypassing the HTML
+// header/footer/role-table below — these are JSON endpoints, not pages.
+if (str_starts_with($route, 'api/')) {
+    $apiFile = __DIR__ . '/' . $route . '.php';
+    if (is_file($apiFile)) {
+        require $apiFile;
+        exit;
+    }
+}
+
 // ---- Protected routes ----
 $routes = [
     'dashboard' => ['pages/dashboard.php', 'Dashboard', []],
-    'wallet' => ['pages/wallet.php', 'Wallet', ['customer']],
-    'deposits' => ['pages/deposits.php', 'Deposits', ['customer']],
-    'withdrawals' => ['pages/withdrawals.php', 'Withdrawals', ['customer']],
     'transactions' => ['pages/transactions.php', 'Transactions', []],
+    'payins' => ['pages/payins.php', 'PayIns', ['customer']],
+    'payouts' => ['pages/payouts.php', 'PayOuts', ['customer']],
+    'chargebacks' => ['pages/chargebacks.php', 'Chargebacks', ['customer']],
+    'api-access' => ['pages/api-access.php', 'API Access', ['customer']],
+    'api-docs' => ['pages/api-docs.php', 'API documentation', ['customer']],
     'support' => ['pages/support.php', 'Support', ['customer']],
     'notifications' => ['pages/notifications.php', 'Notifications', []],
     'profile' => ['pages/profile.php', 'Profile', []],
     'settings' => ['pages/settings.php', 'Settings', []],
     'identity-vault' => ['pages/identity-vault.php', 'Identity Vault', ['customer']],
     'kyc-verification' => ['pages/kyc-verification.php', 'KYC Verification', ['customer']],
+    'key-verification' => ['pages/key-verification.php', 'API & Key Verification', ['customer']],
+    'admin/payins' => ['pages/admin/payins.php', 'PayIns', ['admin', 'operator']],
+    'admin/payouts' => ['pages/admin/payouts.php', 'PayOuts', ['admin', 'operator']],
+    'admin/chargebacks' => ['pages/admin/chargebacks.php', 'Chargebacks', ['admin', 'operator']],
+    'admin/routing' => ['pages/admin/routing.php', 'Routing & switching', ['admin']],
+    'admin/settlements' => ['pages/admin/settlements.php', 'Settlements', ['admin']],
+    'admin/api-logs' => ['pages/admin/api-logs.php', 'API logs', ['admin']],
+    'admin/webhooks' => ['pages/admin/webhooks.php', 'Webhooks', ['admin']],
     'admin/users' => ['pages/admin/users.php', 'Customers', ['admin', 'operator']],
     'admin/kyc-review' => ['pages/admin/kyc-review.php', 'KYC Review', ['admin']],
     'admin/gateways' => ['pages/admin/gateways.php', 'Payment gateways', ['admin']],

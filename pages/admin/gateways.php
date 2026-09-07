@@ -130,6 +130,23 @@ render_hero_banner(
                 </p>
             </div>
 
+            <div id="ag-payout-account-field" class="hidden">
+                <label for="ag-payout-account" class="field-label">
+                    RazorpayX payout account number
+                </label>
+
+                <input type="text"
+                       id="ag-payout-account"
+                       class="field-input font-mono"
+                       placeholder="e.g. 7878780080316316"
+                       autocomplete="off"
+                       spellcheck="false">
+
+                <p class="field-help">
+                    The RazorpayX current account payouts are debited from — required only if this gateway should also process withdrawals, not needed for pay-ins alone. Found on the RazorpayX dashboard, distinct from the beneficiary's own bank account.
+                </p>
+            </div>
+
             <div id="ag-sandbox-field" class="hidden">
                 <label class="flex items-center gap-2.5 cursor-pointer">
                     <input type="checkbox" id="ag-sandbox-mode" class="rounded" checked>
@@ -220,6 +237,23 @@ render_hero_banner(
                 </p>
             </div>
 
+            <div id="rk-payout-account-field" class="hidden">
+                <label for="rk-payout-account" class="field-label">
+                    RazorpayX payout account number
+                </label>
+
+                <input type="text"
+                       id="rk-payout-account"
+                       class="field-input font-mono"
+                       placeholder="e.g. 7878780080316316"
+                       autocomplete="off"
+                       spellcheck="false">
+
+                <p class="field-help">
+                    Leave blank to keep the current one.
+                </p>
+            </div>
+
             <div id="rk-sandbox-field" class="hidden">
                 <label class="flex items-center gap-2.5 cursor-pointer">
                     <input type="checkbox" id="rk-sandbox-mode" class="rounded">
@@ -273,12 +307,12 @@ render_hero_banner(
         class="rounded-md p-0 backdrop:bg-black/40 w-full max-w-md"
         aria-labelledby="edit-limits-title">
 
-    <form id="edit-limits-form" class="flex flex-col">
+    <form id="edit-limits-form" class="flex flex-col max-h-[85vh]">
 
-        <div class="flex items-start justify-between gap-4 px-6 py-5 border-b border-border">
+        <div class="flex items-start justify-between gap-4 px-6 py-5 border-b border-border shrink-0">
             <h2 id="edit-limits-title"
                 class="text-3xl font-semibold text-text-primary">
-                Priority &amp; daily limit
+                Priority &amp; limits
             </h2>
 
             <button type="button"
@@ -289,7 +323,7 @@ render_hero_banner(
             </button>
         </div>
 
-        <div class="px-6 py-5 space-y-4">
+        <div class="px-6 py-5 space-y-4 overflow-y-auto">
 
             <p id="edit-limits-target" class="text-md text-text-secondary"></p>
 
@@ -313,26 +347,121 @@ render_hero_banner(
             </div>
 
             <div>
-                <label for="el-daily-limit" class="field-label">
-                    Daily limit (₹)
+                <label for="el-per-transaction-limit" class="field-label">
+                    Per-transaction limit (₹)
                 </label>
 
                 <input type="number"
-                       id="el-daily-limit"
+                       id="el-per-transaction-limit"
                        class="field-input"
                        min="0"
                        step="0.01"
                        placeholder="Leave blank for unlimited">
 
                 <p class="field-help">
-                    Our-side cap on total amount routed through this gateway per calendar day (UTC). Resets automatically at UTC midnight.
+                    A single transaction larger than this skips this gateway, regardless of remaining capacity.
                 </p>
+            </div>
+
+            <div>
+                <p class="field-label mb-1.5">Ticket size (₹)</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label for="el-min-ticket" class="text-xs text-text-secondary">Minimum</label>
+                        <input type="number"
+                               id="el-min-ticket"
+                               class="field-input"
+                               min="0"
+                               step="0.01"
+                               placeholder="No minimum">
+                    </div>
+                    <div>
+                        <label for="el-max-ticket" class="text-xs text-text-secondary">Maximum</label>
+                        <input type="number"
+                               id="el-max-ticket"
+                               class="field-input"
+                               min="0"
+                               step="0.01"
+                               placeholder="No maximum">
+                    </div>
+                </div>
+                <p class="field-help">
+                    A transaction outside this band skips this gateway entirely — separate from the hourly/daily/monthly capacity limits below and the per-transaction ceiling above.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                    <label for="el-hourly-limit" class="field-label">
+                        Hourly limit (₹)
+                    </label>
+
+                    <input type="number"
+                           id="el-hourly-limit"
+                           class="field-input"
+                           min="0"
+                           step="0.01"
+                           placeholder="Unlimited">
+                </div>
+
+                <div>
+                    <label for="el-daily-limit" class="field-label">
+                        Daily limit (₹)
+                    </label>
+
+                    <input type="number"
+                           id="el-daily-limit"
+                           class="field-input"
+                           min="0"
+                           step="0.01"
+                           placeholder="Unlimited">
+                </div>
+
+                <div>
+                    <label for="el-monthly-limit" class="field-label">
+                        Monthly limit (₹)
+                    </label>
+
+                    <input type="number"
+                           id="el-monthly-limit"
+                           class="field-input"
+                           min="0"
+                           step="0.01"
+                           placeholder="Unlimited">
+                </div>
+            </div>
+
+            <p class="field-help">
+                Our-side caps on total amount routed through this gateway per hour / calendar day (UTC) / calendar month. Each resets automatically at the start of its own window.
+            </p>
+
+            <div class="flex items-center gap-5 pt-1">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="el-payin-enabled" class="rounded">
+                    <span class="text-md text-text-primary">PayIn enabled</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="el-payout-enabled" class="rounded">
+                    <span class="text-md text-text-primary">PayOut enabled</span>
+                </label>
+            </div>
+
+            <div class="rounded-md border border-border bg-surface-muted p-3">
+                <label class="flex items-start gap-2.5 cursor-pointer">
+                    <input type="checkbox" id="el-is-mock" class="rounded mt-0.5">
+                    <span>
+                        <span class="block text-md text-text-primary">Mock / test gateway</span>
+                        <span class="block text-sm text-text-secondary mt-0.5">
+                            Never calls a real provider — every transaction routed here settles instantly (success) for local/test use. Only enable this for a gateway you know isn't backed by real credentials; a real provider (Razorpay/Cashfree) missing valid credentials is otherwise correctly treated as ineligible, never simulated.
+                        </span>
+                    </span>
+                </label>
             </div>
 
             <p id="el-error" class="field-error hidden"></p>
         </div>
 
-        <div class="flex items-center justify-between gap-3 px-6 py-4 border-t border-border bg-surface-muted rounded-b-md">
+        <div class="flex items-center justify-between gap-3 px-6 py-4 border-t border-border bg-surface-muted rounded-b-md shrink-0">
             <button type="button"
                     class="btn-ghost !px-3 !py-1.5"
                     id="el-reset-usage">

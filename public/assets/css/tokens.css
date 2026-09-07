@@ -21,8 +21,8 @@
   --color-text-primary-rgb: 52 71 103;
   --color-text-secondary: #67748e;      /* supplied "primary" tone reassigned to secondary/supporting text, ~4.6:1 on white */
   --color-text-secondary-rgb: 103 116 142;
-  --color-text-tertiary: #4e148c;       /* accent tone for links / emphasis, ~8.4:1 on white */
-  --color-text-tertiary-rgb: 78 20 140;
+  --color-text-tertiary: #1e40af;       /* accent tone for links / emphasis, ~8.6:1 on white */
+  --color-text-tertiary-rgb: 30 64 175;
   --color-text-inverse: #f8fafc;        /* accessible alt: supplied inverse (#64748b) is a mid-gray and unreadable on dark surfaces */
   --color-text-inverse-rgb: 248 250 252;
 
@@ -43,12 +43,16 @@
   --color-border-strong-rgb: 185 191 199;
 
   /* ---- Brand ---- */
-  --color-brand: #4e148c;
-  --color-brand-rgb: 78 20 140;
-  --color-brand-emphasis: #3a0f68;
-  --color-brand-emphasis-rgb: 58 15 104;
-  --color-brand-muted: #f2e9fa;
-  --color-brand-muted-rgb: 242 233 250;
+  /* Matches the new Verapay mark: a navy-to-blue lockup. The functional
+     brand color is one flat tone (#1e40af) rather than the logo's own
+     gradient — buttons/badges/focus rings need a single solid color, the
+     gradient stays inside the logo asset itself. */
+  --color-brand: #1e40af;
+  --color-brand-rgb: 30 64 175;
+  --color-brand-emphasis: #14275e;
+  --color-brand-emphasis-rgb: 20 39 94;
+  --color-brand-muted: #e8f0fe;
+  --color-brand-muted-rgb: 232 240 254;
 
   /* ---- Status ---- */
   --color-success: #15803d;
@@ -60,16 +64,18 @@
   --color-warning: #b45309;
   --color-warning-rgb: 180 83 9;
   --color-warning-bg: #fffbeb;
-  --color-info: #1d4ed8;
-  --color-info-rgb: 29 78 216;
-  --color-info-bg: #eff6ff;
+  /* Cyan, not blue: brand is blue now too, so info needs to stay visually
+     distinct from brand chrome. Echoes the mark's own cyan wing accent. */
+  --color-info: #0e7490;
+  --color-info-rgb: 14 116 144;
+  --color-info-bg: #ecfeff;
   --color-neutral: #475569;
   --color-neutral-rgb: 71 85 105;
   --color-neutral-bg: #f1f5f9;
 
   /* ---- Shadows ---- */
   --shadow-card: rgba(149, 157, 165, 0.2) 0px 8px 24px 0px;
-  --shadow-soft: rgba(78, 20, 140, 0.05) 0px 4px 12px 0px;
+  --shadow-soft: rgba(30, 64, 175, 0.05) 0px 4px 12px 0px;
 
   /* ---- Motion ---- */
   --duration-instant: 200ms;

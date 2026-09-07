@@ -45,7 +45,7 @@ Colors are defined twice in `tokens.css`: as a hex value (for direct CSS/SVG ref
 |---|---|---|
 | `color.text.primary` | `#344767` | Highest-emphasis text (headings, primary values) — 8.9:1 on white |
 | `color.text.secondary` | `#67748e` | Supporting text, labels, helper copy — 4.6:1 on white |
-| `color.text.tertiary` | `#4e148c` | Links, accented inline text — 8.4:1 on white |
+| `color.text.tertiary` | `#1e40af` | Links, accented inline text — 8.6:1 on white |
 | `color.text.inverse` | `#f8fafc` | Text on dark surfaces (sidebar, hero banner) |
 | `color.surface.base` | `#ffffff` | Page background |
 | `color.surface.muted` | `#f8f9fa` | Subtle section backgrounds, hover fills, skeletons |
@@ -53,13 +53,13 @@ Colors are defined twice in `tokens.css`: as a hex value (for direct CSS/SVG ref
 | `color.surface.strong` | `#16181d` | Sidebar, inverse/dark panels |
 | `color.border.default` | `#e1e1e1` | Decorative dividers only — **must not** carry meaning or delimit an interactive control |
 | `color.border.strong` | `#b9bfc7` | Functional borders: inputs, focus-adjacent outlines — passes the 3:1 non-text contrast minimum |
-| `color.brand` | `#4e148c` | Primary actions, active nav, focus ring |
-| `color.brand.emphasis` | `#3a0f68` | Hover/active state of brand-colored elements |
-| `color.brand.muted` | `#f2e9fa` | Selected/active background tint |
+| `color.brand` | `#1e40af` | Primary actions, active nav, focus ring |
+| `color.brand.emphasis` | `#14275e` | Hover/active state of brand-colored elements |
+| `color.brand.muted` | `#e8f0fe` | Selected/active background tint |
 | `color.success` / `.bg` | `#15803d` / `#ecfdf3` | Success state, text on `.bg` |
 | `color.danger` / `.bg` | `#b91c1c` / `#fef2f2` | Errors, destructive actions |
 | `color.warning` / `.bg` | `#b45309` / `#fffbeb` | Pending/attention states |
-| `color.info` / `.bg` | `#1d4ed8` / `#eff6ff` | Informational states (refunded, neutral highlight) |
+| `color.info` / `.bg` | `#0e7490` / `#ecfeff` | Informational states (refunded, neutral highlight) — cyan, kept distinct from brand blue |
 | `color.neutral` / `.bg` | `#475569` / `#f1f5f9` | Cancelled/inactive states |
 
 **Must:** reference colors through their Tailwind class (`text-text-secondary`, `bg-brand`, `border-border-strong`, …), never a raw hex value in markup or a component's CSS. **Must not:** use color as the only signal for status — pair every status color with an icon or text label (see §4, status components).
@@ -97,7 +97,7 @@ space.4 = 8px    space.8 = 16px
 
 ```
 shadow.card = rgba(149, 157, 165, 0.2) 0px 8px 24px 0px   /* elevated: modals, toasts, hover-lifted cards */
-shadow.soft = rgba(78, 20, 140, 0.05) 0px 4px 12px 0px    /* resting: default card elevation */
+shadow.soft = rgba(30, 64, 175, 0.05) 0px 4px 12px 0px    /* resting: default card elevation */
 
 motion.duration.instant = 200ms   /* hover, focus, dropdown open/close, button loading */
 motion.duration.fast    = 300ms   /* sidebar drawer, modal open/close */

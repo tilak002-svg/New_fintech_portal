@@ -6,7 +6,7 @@
     const form = document.getElementById('filters-form');
     const tbody = document.getElementById('txn-tbody');
     const pagination = document.getElementById('txn-pagination');
-    const colCount = isOperator ? 7 : 6;
+    const colCount = isOperator ? 8 : 7;
 
     let currentPage = 1;
     let searchDebounce;
@@ -82,9 +82,10 @@
                 </td>
                 <td class="capitalize">${escapeHtml(t.type)}</td>
                 <td>${escapeHtml(t.method)}</td>
-                <td>${money(t.amount)}</td>
+                <td class="table-amount">${money(t.amount)}</td>
                 <td><span class="${statusBadgeClass(t.status)}">${escapeHtml(t.status)}</span></td>
                 <td class="text-text-secondary whitespace-nowrap">${new Date(t.created_at).toLocaleString()}</td>
+                <td><button type="button" class="btn-icon" data-view-transaction="${t.id}" aria-label="View transaction details"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.75"/></svg></button></td>
             </tr>`).join('');
 
         const { page: p, total_pages, total } = data.pagination;

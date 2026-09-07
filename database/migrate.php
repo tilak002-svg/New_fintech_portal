@@ -115,6 +115,66 @@ if (!column_exists($pdo, 'payment_gateways', 'consecutive_failures')) {
     $applied[] = 'migration7.sql (payment_gateways circuit breaker: consecutive_failures, auto_paused_until)';
 }
 
+if (!column_exists($pdo, 'payment_gateways', 'payout_account_number')) {
+    run_sql_file($pdo, __DIR__ . '/migration8.sql');
+    $applied[] = 'migration8.sql (payment_gateways.payout_account_number, customer_api_credentials.webhook_signing_secret_encrypted)';
+}
+
+if (!column_exists($pdo, 'transactions', 'merchant_order_id')) {
+    run_sql_file($pdo, __DIR__ . '/migration9.sql');
+    $applied[] = 'migration9.sql (transactions merchant/end-customer/beneficiary columns, payment_sessions)';
+}
+
+if (!column_exists($pdo, 'payment_gateways', 'hourly_limit_amount')) {
+    run_sql_file($pdo, __DIR__ . '/migration10.sql');
+    $applied[] = 'migration10.sql (gateway hourly/monthly/per-transaction limits, gateway_hourly_usage, gateway_monthly_usage)';
+}
+
+if (!table_exists($pdo, 'api_logs')) {
+    run_sql_file($pdo, __DIR__ . '/migration11.sql');
+    $applied[] = 'migration11.sql (api_logs)';
+}
+
+if (!table_exists($pdo, 'password_resets')) {
+    run_sql_file($pdo, __DIR__ . '/migration12.sql');
+    $applied[] = 'migration12.sql (password_resets)';
+}
+
+if (!column_exists($pdo, 'customer_api_credentials', 'last_verified_at')) {
+    run_sql_file($pdo, __DIR__ . '/migration13.sql');
+    $applied[] = 'migration13.sql (customer_api_credentials.last_verified_at)';
+}
+
+if (!column_exists($pdo, 'users', 'must_change_password')) {
+    run_sql_file($pdo, __DIR__ . '/migration14.sql');
+    $applied[] = 'migration14.sql (users.must_change_password)';
+}
+
+if (!table_exists($pdo, 'rate_limit_hits')) {
+    run_sql_file($pdo, __DIR__ . '/migration15.sql');
+    $applied[] = 'migration15.sql (rate_limit_hits)';
+}
+
+if (!table_exists($pdo, 'customer_webhook_deliveries')) {
+    run_sql_file($pdo, __DIR__ . '/migration16.sql');
+    $applied[] = 'migration16.sql (customer_webhook_deliveries, transactions reconciliation columns)';
+}
+
+if (!table_exists($pdo, 'platform_settings')) {
+    run_sql_file($pdo, __DIR__ . '/migration17.sql');
+    $applied[] = 'migration17.sql (platform_settings)';
+}
+
+if (!column_exists($pdo, 'payment_gateways', 'payin_enabled')) {
+    run_sql_file($pdo, __DIR__ . '/migration18.sql');
+    $applied[] = 'migration18.sql (payment_gateways payin_enabled/payout_enabled/is_mock/min_ticket_size/max_ticket_size)';
+}
+
+if (!table_exists($pdo, 'chargebacks')) {
+    run_sql_file($pdo, __DIR__ . '/migration19.sql');
+    $applied[] = 'migration19.sql (chargebacks, chargeback_events, wallet_ledger, wallets.receivable_balance)';
+}
+
 if (empty($applied)) {
     echo "Database already up to date — nothing to migrate.\n";
 } else {

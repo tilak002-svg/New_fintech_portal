@@ -65,7 +65,8 @@ JSON,
   "display_name": "Backup Processor",
   "provider": "razorpay",
   "api_key": "the_key_secret_from_razorpay",
-  "public_key": "rzp_live_your_key_id"
+  "public_key": "rzp_live_your_key_id",
+  "payout_account_number": "7878780080316316"
 }
 JSON,
         'response' => <<<JSON
@@ -75,7 +76,7 @@ JSON,
   "message": "Gateway added. Activate it when you are ready to accept traffic through it."
 }
 JSON,
-        'notes' => "provider must be one of: razorpay, payu, cashfree, stripe, paypal, other. api_key must be at least 8 characters — stored both as a one-way hash (display only) and AES-256-GCM encrypted (for real outbound calls). public_key is required when provider is razorpay (Key ID) or cashfree (Client ID), ignored otherwise — not sensitive, returned in full by list.php. sandbox_mode (bool, default true) picks which base URL Cashfree calls; Razorpay ignores it since it uses one endpoint for both modes.",
+        'notes' => "provider must be one of: razorpay, payu, cashfree, stripe, paypal, other. api_key must be at least 8 characters — stored both as a one-way hash (display only) and AES-256-GCM encrypted (for real outbound calls). public_key is required when provider is razorpay (Key ID) or cashfree (Client ID), ignored otherwise — not sensitive, returned in full by list.php. payout_account_number (razorpay only, optional) is the RazorpayX source current account — set it to make this gateway live-payout-capable, not just live-pay-in-capable; omit it and the gateway still does live pay-ins but withdrawals routed to it fall back to the old synchronous/manual settlement. sandbox_mode (bool, default true) picks which base URL Cashfree calls; Razorpay ignores it since it uses one endpoint for both modes.",
     ],
     [
         'slug' => 'update-status',
@@ -109,7 +110,7 @@ JSON,
         'path' => '/api/admin/gateways/rotate-key.php',
         'summary' => "Replace a gateway's stored API key. The previous key is invalidated immediately.",
         'request' => <<<JSON
-{ "id": 4, "api_key": "the_new_key_secret", "public_key": "rzp_live_the_new_key_id" }
+{ "id": 4, "api_key": "the_new_key_secret", "public_key": "rzp_live_the_new_key_id", "payout_account_number": "7878780080316316" }
 JSON,
         'response' => <<<JSON
 {
@@ -118,7 +119,7 @@ JSON,
   "message": "Backup Processor's key has been rotated."
 }
 JSON,
-        'notes' => 'Same 8-character minimum as create.php. public_key is optional here — omit it to keep the gateway\'s current Key ID, or send a new one (Razorpay issues Key ID + secret as a pair, so send both together when regenerating). There is no "view current key" endpoint by design.',
+        'notes' => 'Same 8-character minimum as create.php. public_key and payout_account_number are both optional here — omit either to keep the gateway\'s current value (Razorpay issues Key ID + secret as a pair, so send both together when regenerating the secret). There is no "view current key" endpoint by design.',
     ],
     [
         'slug' => 'update-limits',
@@ -207,7 +208,8 @@ render_hero_banner(
         <li><strong class="text-text-primary">CSRF:</strong> every <code class="font-mono text-sm">POST</code> requires an <code class="font-mono text-sm">X-CSRF-Token</code> header matching the current session's token (read from the <code class="font-mono text-sm">&lt;meta name="csrf-token"&gt;</code> tag if you're calling this from the browser console).</li>
         <li><strong class="text-text-primary">Response envelope:</strong> every response is <code class="font-mono text-sm">{ "success": bool, "data": ..., "message": "..." }</code>. Check <code class="font-mono text-sm">success</code>, not the HTTP status alone, before trusting <code class="font-mono text-sm">data</code>.</li>
         <li><strong class="text-text-primary">Exactly one default:</strong> <code class="font-mono text-sm">set-default.php</code> is the only way to change which gateway is marked <code class="font-mono text-sm">is_default: true</code>, and it can't point at an inactive gateway.</li>
-        <li><strong class="text-text-primary">Selection is live, outbound calls are not:</strong> every deposit/withdrawal now picks an active gateway under its daily limit and reserves capacity against it, and the webhook receiver can resolve a pending transaction to success/failed. What's still missing is the actual outbound call that creates the payment at the provider — until that's built, deposits/withdrawals settle the same way they always did (synchronously in-app), and the webhook receiver has nothing to correlate against unless something else marks a transaction's <code class="font-mono text-sm">reference</code> at the provider first.</li>
+        <li><strong class="text-text-primary">Live for Razorpay and Cashfree, both directions:</strong> every deposit/withdrawal picks an active gateway under its daily limit and reserves capacity against it; for a gateway with provider <code class="font-mono text-sm">razorpay</code> or <code class="font-mono text-sm">cashfree</code> and its required credentials set, the outbound call to actually create the order (pay-in) or payout (withdrawal) at the provider happens for real, and the provider's webhook resolves it to success/failed. Razorpay payouts additionally need <code class="font-mono text-sm">payout_account_number</code> (the RazorpayX source account) — a gateway can be pay-in-capable without being payout-capable if that's not set. Any other provider, or a gateway missing its required credentials, still settles the old way (synchronously in-app, no live call).</li>
+        <li><strong class="text-text-primary">Customer-facing integration is separate:</strong> this page only documents gateway <em>management</em> (this admin API). A merchant's own systems integrate against the PayIn/PayOut API instead — client_key/secret_key, IP whitelisting, and outbound webhooks — <a href="/api-docs" class="text-brand-emphasis underline">documented here</a> (visit as a customer account, or see Settings → API access for a given merchant).</li>
     </ul>
 </div>
 
