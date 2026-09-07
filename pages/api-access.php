@@ -53,7 +53,7 @@ render_hero_banner($user, 'API Access', 'Connect your website or application to 
             </div>
             <div>
                 <label class="field-label">Client secret</label>
-                <div class="flex gap-2">
+                <div class="flex flex-col sm:flex-row gap-3">
                     <input type="text" id="aa-secret-key" class="field-input font-mono flex-1" readonly>
                     <?= aa_copy_btn('aa-secret-key') ?>
                     <button type="button" id="aa-rotate-secret" class="btn-secondary shrink-0">Rotate</button>
@@ -78,7 +78,7 @@ render_hero_banner($user, 'API Access', 'Connect your website or application to 
 
         <div class="pt-5 border-t border-border">
             <label class="field-label">Webhook signing secret</label>
-            <div class="flex gap-2">
+            <div class="flex flex-col sm:flex-row gap-3">
                 <input type="text" id="aa-webhook-secret" class="field-input font-mono flex-1" readonly>
                 <?= aa_copy_btn('aa-webhook-secret') ?>
                 <button type="button" id="aa-rotate-webhook-secret" class="btn-secondary shrink-0">Rotate</button>

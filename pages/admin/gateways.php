@@ -307,9 +307,9 @@ render_hero_banner(
         class="rounded-md p-0 backdrop:bg-black/40 w-full max-w-md"
         aria-labelledby="edit-limits-title">
 
-    <form id="edit-limits-form" class="flex flex-col">
+    <form id="edit-limits-form" class="flex flex-col max-h-[85vh]">
 
-        <div class="flex items-start justify-between gap-4 px-6 py-5 border-b border-border">
+        <div class="flex items-start justify-between gap-4 px-6 py-5 border-b border-border shrink-0">
             <h2 id="edit-limits-title"
                 class="text-3xl font-semibold text-text-primary">
                 Priority &amp; limits
@@ -323,7 +323,7 @@ render_hero_banner(
             </button>
         </div>
 
-        <div class="px-6 py-5 space-y-4">
+        <div class="px-6 py-5 space-y-4 overflow-y-auto">
 
             <p id="edit-limits-target" class="text-md text-text-secondary"></p>
 
@@ -365,7 +365,7 @@ render_hero_banner(
 
             <div>
                 <p class="field-label mb-1.5">Ticket size (₹)</p>
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                         <label for="el-min-ticket" class="text-xs text-text-secondary">Minimum</label>
                         <input type="number"
@@ -461,7 +461,7 @@ render_hero_banner(
             <p id="el-error" class="field-error hidden"></p>
         </div>
 
-        <div class="flex items-center justify-between gap-3 px-6 py-4 border-t border-border bg-surface-muted rounded-b-md">
+        <div class="flex items-center justify-between gap-3 px-6 py-4 border-t border-border bg-surface-muted rounded-b-md shrink-0">
             <button type="button"
                     class="btn-ghost !px-3 !py-1.5"
                     id="el-reset-usage">

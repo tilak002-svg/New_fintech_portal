@@ -58,9 +58,9 @@ $extraScripts = ['/assets/js/pages/admin-webhooks.js'];
     'Inbound delivery from configured gateways, and outbound delivery to customer callback URLs.'
 ); ?>
 
-<div class="flex items-center justify-between mb-4">
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
     <h2 class="text-2xl font-semibold text-text-primary">Outbound — customer callbacks</h2>
-    <div class="flex items-center gap-3">
+    <div class="flex flex-wrap items-center gap-3">
         <button type="button" id="run-reconciliation-now" class="btn-secondary"><?= icon('clock', 'w-4 h-4') ?> Reconcile pending transactions</button>
         <button type="button" id="retry-webhooks-now" class="btn-secondary"><?= icon('send', 'w-4 h-4') ?> Retry due deliveries now</button>
     </div>
