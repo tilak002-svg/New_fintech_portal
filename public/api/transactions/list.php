@@ -22,6 +22,16 @@ if (in_array($_GET['type'] ?? '', ['deposit', 'withdrawal'], true)) {
     $params['type'] = $_GET['type'];
 }
 
+// Additive filter distinguishing merchant-API-driven activity (PayIns/
+// PayOuts, merchant_order_id set) from legacy browser-wallet activity —
+// used by pages/admin/payins.php and admin/payouts.php. Omitted entirely
+// (the default), this endpoint's behavior is unchanged.
+if (($_GET['source'] ?? '') === 'api') {
+    $where[] = 't.merchant_order_id IS NOT NULL';
+} elseif (($_GET['source'] ?? '') === 'wallet') {
+    $where[] = 't.merchant_order_id IS NULL';
+}
+
 if (in_array($_GET['status'] ?? '', ['pending', 'success', 'failed', 'cancelled', 'refunded'], true)) {
     $where[] = 't.status = :status';
     $params['status'] = $_GET['status'];
@@ -59,11 +69,23 @@ $sort = $sortMap[$_GET['sort'] ?? 'newest'] ?? $sortMap['newest'];
 
 $whereSql = implode(' AND ', $where);
 
+// merchant_order_id/end_customer_*/beneficiary_* and the joined gateway's
+// sandbox_mode are additive columns (NULL for legacy wallet rows/rows with
+// no gateway) — consumed by pages/admin/payins.php and admin/payouts.php;
+// the existing Transactions page ignores columns it doesn't render.
 $select = $isOperator
-    ? "SELECT t.id, t.type, t.method, t.amount, t.fee, t.net_amount, t.currency, t.status, t.reference, t.created_at, u.name AS user_name, u.email AS user_email
-       FROM transactions t JOIN users u ON u.id = t.user_id WHERE {$whereSql} ORDER BY {$sort} LIMIT :limit OFFSET :offset"
-    : "SELECT t.id, t.type, t.method, t.amount, t.fee, t.net_amount, t.currency, t.status, t.reference, t.created_at
-       FROM transactions t WHERE {$whereSql} ORDER BY {$sort} LIMIT :limit OFFSET :offset";
+    ? "SELECT t.id, t.type, t.method, t.amount, t.fee, t.net_amount, t.currency, t.status, t.reference, t.created_at,
+              t.merchant_order_id, t.end_customer_name, t.end_customer_email, t.end_customer_phone,
+              t.beneficiary_name, t.beneficiary_account_number, t.beneficiary_ifsc, t.beneficiary_bank_name,
+              pg.sandbox_mode AS gateway_sandbox_mode, u.name AS user_name, u.email AS user_email
+       FROM transactions t JOIN users u ON u.id = t.user_id LEFT JOIN payment_gateways pg ON pg.id = t.gateway_id
+       WHERE {$whereSql} ORDER BY {$sort} LIMIT :limit OFFSET :offset"
+    : "SELECT t.id, t.type, t.method, t.amount, t.fee, t.net_amount, t.currency, t.status, t.reference, t.created_at,
+              t.merchant_order_id, t.end_customer_name, t.end_customer_email, t.end_customer_phone,
+              t.beneficiary_name, t.beneficiary_account_number, t.beneficiary_ifsc, t.beneficiary_bank_name,
+              pg.sandbox_mode AS gateway_sandbox_mode
+       FROM transactions t LEFT JOIN payment_gateways pg ON pg.id = t.gateway_id
+       WHERE {$whereSql} ORDER BY {$sort} LIMIT :limit OFFSET :offset";
 
 $stmt = $pdo->prepare($select);
 foreach ($params as $key => $value) {
@@ -73,6 +95,16 @@ $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
 $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
 $stmt->execute();
 $transactions = $stmt->fetchAll();
+
+// Never return a full beneficiary account number over the API — last 4
+// only, same redaction rule transactions/detail.php already applies.
+foreach ($transactions as &$row) {
+    if (!empty($row['beneficiary_account_number'])) {
+        $row['beneficiary_account_last4'] = substr($row['beneficiary_account_number'], -4);
+    }
+    unset($row['beneficiary_account_number']);
+}
+unset($row);
 
 $countSql = $isOperator
     ? "SELECT COUNT(*) FROM transactions t JOIN users u ON u.id = t.user_id WHERE {$whereSql}"

@@ -86,12 +86,124 @@ function paginate_params(int $defaultPerPage = 20, int $maxPerPage = 100): array
     return [$page, $perPage, ($page - 1) * $perPage];
 }
 
-function json_response(bool $success, $data = null, string $message = '', int $statusCode = 200): never
+/**
+ * One id per request, generated on first use and memoized — cheap
+ * end-to-end tracing without a request-scoped DI container. Returned in
+ * every JSON response body and the X-Request-ID header (see json_response())
+ * so a customer reporting "my payin failed" can hand back one id that's
+ * traceable through api_logs, audit_logs, and error_log() output.
+ */
+function request_id(): string
 {
+    static $id = null;
+    if ($id === null) {
+        $id = 'req_' . bin2hex(random_bytes(8));
+    }
+    return $id;
+}
+
+/**
+ * $errorCode is optional and purely additive — a short machine-readable
+ * string (e.g. 'INVALID_CREDENTIALS', 'IP_NOT_WHITELISTED', 'RATE_LIMITED')
+ * for callers that want to branch on something more stable than the
+ * human-readable $message. Omitting it (the default) is fully backward
+ * compatible with every existing call site.
+ */
+function json_response(bool $success, $data = null, string $message = '', int $statusCode = 200, ?string $errorCode = null): never
+{
+    // Logs genuine merchant-API traffic only — the flag is set exclusively
+    // by authenticate_via_bearer_token() (includes/auth.php), never by the
+    // ordinary session+CSRF path, so a normal dashboard page load never
+    // creates a row here. See database's api_logs table.
+    if (isset($GLOBALS['__api_log_user_id']) && function_exists('db')) {
+        try {
+            $endpoint = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+            db()->prepare(
+                'INSERT INTO api_logs (user_id, method, endpoint, http_status, ip_address) VALUES (?, ?, ?, ?, ?)'
+            )->execute([
+                $GLOBALS['__api_log_user_id'],
+                $_SERVER['REQUEST_METHOD'] ?? '',
+                $endpoint,
+                $statusCode,
+                $_SERVER['REMOTE_ADDR'] ?? null,
+            ]);
+        } catch (Throwable $e) {
+            error_log('[api_logs] failed to write log entry: ' . $e->getMessage());
+        }
+    }
+
     http_response_code($statusCode);
     header('Content-Type: application/json');
-    echo json_encode(['success' => $success, 'data' => $data, 'message' => $message]);
+    header('X-Request-ID: ' . request_id());
+    echo json_encode([
+        'success' => $success,
+        'data' => $data,
+        'message' => $message,
+        'error_code' => $errorCode,
+        'request_id' => request_id(),
+    ]);
     exit;
+}
+
+/**
+ * Generic sliding-window rate limiter backed by rate_limit_hits. $key
+ * should already be scoped by the caller (e.g. "forgot_password:<ip>" or
+ * "payin_create:merchant:<id>") — this function only counts and records,
+ * it doesn't know what the key means.
+ *
+ * Occasionally (1-in-50 calls) prunes hits older than a day so this table
+ * doesn't grow unbounded — cheap enough to run inline given how rarely it
+ * fires, and avoids needing a cron just for housekeeping.
+ */
+function rate_limit_check(string $key, int $maxHits, int $windowSeconds): bool
+{
+    $pdo = db();
+
+    if (random_int(1, 50) === 1) {
+        try {
+            $pdo->exec("DELETE FROM rate_limit_hits WHERE created_at < (NOW() - INTERVAL 1 DAY)");
+        } catch (Throwable $e) {
+            error_log('[rate_limit] prune failed: ' . $e->getMessage());
+        }
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM rate_limit_hits WHERE rate_key = ? AND created_at > (NOW() - INTERVAL ? SECOND)'
+    );
+    $stmt->execute([$key, $windowSeconds]);
+    if ((int) $stmt->fetchColumn() >= $maxHits) {
+        return false;
+    }
+
+    $pdo->prepare('INSERT INTO rate_limit_hits (rate_key) VALUES (?)')->execute([$key]);
+    return true;
+}
+
+/**
+ * Maps a PayIn/PayOut failure's HTTP status to a stable machine-readable
+ * code — create_payin()/create_payout() (includes/payin_service.php,
+ * payout_service.php) return a status_code but no code of their own, and
+ * duplicating a code onto every one of their return statements would be a
+ * lot of churn for what's really just a handful of distinct failure
+ * shapes. This maps at the endpoint boundary instead.
+ */
+function payin_payout_error_code(int $statusCode): string
+{
+    return match ($statusCode) {
+        422 => 'VALIDATION_ERROR',
+        429 => 'RATE_LIMITED',
+        502 => 'GATEWAY_ERROR',
+        503 => 'GATEWAY_UNAVAILABLE',
+        default => 'REQUEST_FAILED',
+    };
+}
+
+/** Convenience wrapper — ends the request with 429 if the limit is exceeded. */
+function enforce_rate_limit(string $key, int $maxHits, int $windowSeconds, string $message = 'Too many requests. Please try again shortly.'): void
+{
+    if (!rate_limit_check($key, $maxHits, $windowSeconds)) {
+        json_response(false, null, $message, 429, 'RATE_LIMITED');
+    }
 }
 
 /**
@@ -164,6 +276,39 @@ function generate_reference(string $type): string
 {
     $prefix = $type === 'deposit' ? 'DX' : 'WX';
     return $prefix . '-' . strtoupper(bin2hex(random_bytes(4)));
+}
+
+/**
+ * Translates the internal transactions.type enum ('deposit'/'withdrawal')
+ * to the merchant-facing PayIn/PayOut vocabulary, without widening that
+ * live-data column — see includes/payin_service.php for the rationale.
+ */
+function transaction_type_public_name(string $type): string
+{
+    return $type === 'deposit' ? 'payin' : 'payout';
+}
+
+/**
+ * The API Base URL shown to every customer (Settings/API Access, API
+ * documentation) — the single source every page must call instead of
+ * inlining `rtrim(APP_URL, '/') . '/api/v1'`, so an admin's override
+ * (Admin Dashboard → API Base URL → Edit) takes effect everywhere at
+ * once. Falls back to the APP_URL-derived default when no override has
+ * ever been saved, so this is safe to call before an admin has touched
+ * the setting.
+ */
+function platform_api_base_url(): string
+{
+    static $cached = null;
+    if ($cached !== null) {
+        return $cached;
+    }
+
+    $stmt = db()->query('SELECT api_base_url FROM platform_settings WHERE id = 1');
+    $override = $stmt ? $stmt->fetchColumn() : null;
+
+    $cached = $override ?: (rtrim(APP_URL, '/') . '/api/v1');
+    return $cached;
 }
 
 function current_route(): string

@@ -3,4 +3,4 @@
 FROM php:8.3-cli-alpine
 RUN docker-php-ext-install pdo_mysql bcmath
 WORKDIR /app
-CMD ["php", "-S", "0.0.0.0:8000", "-t", "public"]
+CMD ["php", "-S", "0.0.0.0:8000", "-t", "public", "public/router.php"]

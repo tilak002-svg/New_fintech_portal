@@ -28,18 +28,33 @@ render_hero_banner(
             <h2 class="card-title"><?= e($label) ?></h2>
             <span data-doc-badge class="badge-neutral hidden"></span>
         </div>
-        <p data-doc-filename class="text-sm text-text-secondary mb-3 truncate hidden">
-            <span data-doc-filename-text></span>
-            &middot; <a data-doc-view href="#" target="_blank" rel="noopener" class="text-brand-emphasis hover:underline">View</a>
-        </p>
+
         <form data-doc-form data-doc-type="<?= e($type) ?>" novalidate>
-            <div class="flex flex-col sm:flex-row gap-3">
-                <input type="file" data-doc-input accept=".pdf,.jpg,.jpeg,.png" class="field-input flex-1" aria-label="Choose <?= e($label) ?> file">
-                <button type="submit" class="btn-secondary shrink-0" data-doc-submit>
-                    <?= icon('upload', 'w-4 h-4 shrink-0') ?>
-                    <span>Upload</span>
-                </button>
+            <input type="file" data-doc-input accept=".pdf,.jpg,.jpeg,.png" class="sr-only" aria-label="Choose <?= e($label) ?> file">
+
+            <!-- Empty state: drag-and-drop zone -->
+            <div data-doc-dropzone class="rounded-md border-2 border-dashed border-border hover:border-brand hover:bg-brand-muted/30 transition-colors duration-fast cursor-pointer px-4 py-6 text-center">
+                <span class="flex items-center justify-center w-9 h-9 rounded-full bg-surface-muted text-text-secondary mx-auto mb-2"><?= icon('upload', 'w-4 h-4') ?></span>
+                <p class="text-sm text-text-primary"><span class="font-medium text-brand-emphasis">Choose a file</span> or drag and drop</p>
+                <p class="text-xs text-text-secondary mt-1">PDF, JPG, PNG &middot; Max 5MB</p>
             </div>
+
+            <!-- Filled state: uploaded document -->
+            <div data-doc-filename class="hidden rounded-md border border-border px-4 py-3">
+                <div class="flex items-center gap-3">
+                    <span class="icon-chip-sm icon-chip-success shrink-0"><?= icon('check-circle', 'w-4 h-4') ?></span>
+                    <div class="min-w-0 flex-1">
+                        <p data-doc-filename-text class="text-sm font-medium text-text-primary truncate"></p>
+                        <p class="text-xs text-text-secondary">Uploaded successfully</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 mt-3 pl-11">
+                    <a data-doc-view href="#" target="_blank" rel="noopener" class="text-sm text-brand-emphasis hover:underline">Preview</a>
+                    <button type="button" data-doc-replace class="text-sm text-brand-emphasis hover:underline">Replace</button>
+                </div>
+            </div>
+
+            <button type="submit" data-doc-submit class="hidden"></button>
             <p data-doc-error class="field-error hidden mt-2"></p>
         </form>
     </div>

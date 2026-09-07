@@ -34,8 +34,20 @@ function bootstrap_session(): void
     session_start();
 
     if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > SESSION_LIFETIME_MINUTES * 60) {
-        destroy_session();
-        return;
+        // Idle-expired. Clear the data and issue a brand new session id so
+        // this request continues with a clean, properly-cookied session —
+        // deliberately NOT destroy_session() here, since that sends a
+        // cookie-*deletion* header (Max-Age=0) and PHP only sends a fresh
+        // Set-Cookie when the session id actually changes; reusing the
+        // same (already-destroyed) id would leave the browser with no
+        // session cookie at all for its next request. Without this,
+        // any later call to bootstrap_session() in the SAME request
+        // (e.g. rendering pages/auth/login.php right after redirecting an
+        // idle session here) would also short-circuit at the guard above
+        // and never get a fresh csrf_token, breaking that page's login
+        // form with a CSRF mismatch on submit.
+        $_SESSION = [];
+        session_regenerate_id(true);
     }
     $_SESSION['last_activity'] = time();
 
@@ -92,7 +104,7 @@ function require_auth(): array
         deny_unauthenticated();
     }
 
-   $stmt = db()->prepare('SELECT id, name, email, role, status, avatar_initials, gender, created_at FROM users WHERE id = ?');
+   $stmt = db()->prepare('SELECT id, name, email, role, status, must_change_password, avatar_initials, gender, created_at FROM users WHERE id = ?');
     $stmt->execute([$_SESSION['user_id']]);
     $user = $stmt->fetch();
 
@@ -163,7 +175,7 @@ function authenticate_via_bearer_token(string $token): array
 {
     $payload = jwt_decode_verify($token, PLATFORM_JWT_SECRET);
     if ($payload === null || empty($payload['sub']) || !ctype_digit((string) $payload['sub'])) {
-        json_response(false, null, 'Invalid or expired API token.', 401);
+        json_response(false, null, 'Invalid or expired API token.', 401, 'INVALID_TOKEN');
     }
     $userId = (int) $payload['sub'];
 
@@ -174,7 +186,7 @@ function authenticate_via_bearer_token(string $token): array
     if (!$stored || !hash_equals($stored, $token)) {
         // Either no credentials were ever provisioned for this user, or
         // this token was superseded by a later regeneration.
-        json_response(false, null, 'This API token has been revoked. Generate a new one.', 401);
+        json_response(false, null, 'This API token has been revoked. Generate a new one.', 401, 'TOKEN_REVOKED');
     }
 
     $ip = $_SERVER['REMOTE_ADDR'] ?? '';
@@ -182,7 +194,12 @@ function authenticate_via_bearer_token(string $token): array
     $ipStmt->execute([$userId, $ip]);
     if (!$ipStmt->fetchColumn()) {
         write_audit_log($userId, 'api_request_blocked_ip', 'user', $userId, ['ip' => $ip]);
-        json_response(false, null, 'This request\'s IP address is not whitelisted for this account. Contact support to have it added.', 403);
+        // Includes the caller's own IP in `data` (never in prior versions of
+        // this message) so a legitimate customer's own tooling — e.g.
+        // pages/key-verification.php — can show them exactly what to ask
+        // support to whitelist, without this being a new attack surface:
+        // it only ever echoes back the requester's own already-known address.
+        json_response(false, ['ip' => $ip], 'This request\'s IP address is not whitelisted for this account. Contact support to have it added.', 403, 'IP_NOT_WHITELISTED');
     }
 
     $userStmt = db()->prepare('SELECT id, name, email, role, status, avatar_initials, gender, created_at FROM users WHERE id = ?');
@@ -190,11 +207,17 @@ function authenticate_via_bearer_token(string $token): array
     $user = $userStmt->fetch();
 
     if (!$user) {
-        json_response(false, null, 'Invalid or expired API token.', 401);
+        json_response(false, null, 'Invalid or expired API token.', 401, 'INVALID_TOKEN');
     }
     if ($user['status'] !== 'active') {
-        json_response(false, null, 'This account has been suspended.', 403);
+        json_response(false, null, 'This account has been suspended.', 403, 'ACCOUNT_SUSPENDED');
     }
+
+    // Marks this request as genuine bearer-token API traffic, so
+    // json_response() (includes/functions.php) knows to write an api_logs
+    // row once the final status code is known. Never set for the
+    // session+CSRF path — that's ordinary dashboard usage, not "API" traffic.
+    $GLOBALS['__api_log_user_id'] = $userId;
 
     return $user;
 }

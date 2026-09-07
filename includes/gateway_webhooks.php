@@ -77,15 +77,23 @@ function process_gateway_webhook(PDO $pdo, int $gatewayId, array $payload): arra
             return ['status' => 200, 'message' => 'Duplicate delivery — already processed.'];
         }
 
+        // Column list widened (beyond what apply_transaction_outcome() itself
+        // needs) to also carry merchant_order_id/end_customer_*/beneficiary_*
+        // through to dispatch_customer_transaction_webhook() below — see
+        // includes/customer_webhooks.php.
         if ($reference !== '') {
             $txnStmt = $pdo->prepare(
-                'SELECT id, user_id, type, status, amount, fee, net_amount, currency, reference, gateway_id
+                'SELECT id, user_id, type, status, amount, fee, net_amount, currency, reference, gateway_id,
+                        merchant_order_id, end_customer_name, end_customer_email, end_customer_phone,
+                        beneficiary_name, beneficiary_account_number, beneficiary_ifsc, beneficiary_bank_name
                  FROM transactions WHERE reference = ? FOR UPDATE'
             );
             $txnStmt->execute([$reference]);
         } else {
             $txnStmt = $pdo->prepare(
-                'SELECT id, user_id, type, status, amount, fee, net_amount, currency, reference, gateway_id
+                'SELECT id, user_id, type, status, amount, fee, net_amount, currency, reference, gateway_id,
+                        merchant_order_id, end_customer_name, end_customer_email, end_customer_phone,
+                        beneficiary_name, beneficiary_account_number, beneficiary_ifsc, beneficiary_bank_name
                  FROM transactions WHERE gateway_txn_id = ? AND gateway_id = ? FOR UPDATE'
             );
             $txnStmt->execute([$gatewayTxnId, $gatewayId]);
@@ -152,9 +160,9 @@ function apply_transaction_outcome(PDO $pdo, array $transaction, string $outcome
     $walletLock->execute([$transaction['user_id']]);
 
     if ($transaction['type'] === 'deposit') {
-        // Bank-transfer deposits hold net_amount in pending_balance from
-        // creation (see /api/deposits/create.php) — success moves it into
-        // available_balance, failure just releases the hold.
+        // Deposit-type transactions (PayIns — see includes/payin_service.php)
+        // hold net_amount in pending_balance from creation — success moves
+        // it into available_balance, failure just releases the hold.
         $held = $transaction['net_amount'];
         if ($outcome === 'success') {
             $pdo->prepare('UPDATE wallets SET pending_balance = pending_balance - ?, available_balance = available_balance + ? WHERE user_id = ?')
@@ -164,9 +172,9 @@ function apply_transaction_outcome(PDO $pdo, array $transaction, string $outcome
                 ->execute([$held, $transaction['user_id']]);
         }
     } else {
-        // Withdrawals hold amount+fee in pending_balance from creation
-        // (see /api/withdrawals/create.php) — success means it's gone for
-        // good, failure refunds the hold back to available_balance.
+        // Withdrawal-type transactions (PayOuts — see includes/payout_service.php)
+        // hold amount+fee in pending_balance from creation — success means
+        // it's gone for good, failure refunds the hold back to available_balance.
         $held = money_add($transaction['amount'], $transaction['fee']);
         if ($outcome === 'success') {
             $pdo->prepare('UPDATE wallets SET pending_balance = pending_balance - ? WHERE user_id = ?')
@@ -179,6 +187,13 @@ function apply_transaction_outcome(PDO $pdo, array $transaction, string $outcome
 
     $pdo->prepare('UPDATE transactions SET status = ?, gateway_txn_id = COALESCE(?, gateway_txn_id) WHERE id = ?')
         ->execute([$outcome, $gatewayTxnId, $transaction['id']]);
+
+    // Closes out this transaction's hosted-checkout session, if it has one
+    // (see includes/payin_service.php / pages/pay-checkout.php) — a no-op
+    // for withdrawal-type transactions and any transaction with no session,
+    // since the UPDATE simply matches zero rows.
+    $pdo->prepare("UPDATE payment_sessions SET status = ? WHERE transaction_id = ? AND status = 'created'")
+        ->execute([$outcome === 'success' ? 'completed' : 'expired', $transaction['id']]);
 
     if (!empty($transaction['gateway_id'])) {
         record_gateway_outcome($pdo, (int) $transaction['gateway_id'], $outcome === 'success');

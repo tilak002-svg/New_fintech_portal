@@ -13,7 +13,7 @@ render_hero_banner(
     <p class="text-md text-text-secondary">Message our support team directly. Replies appear here as soon as they're sent.</p>
 </div>
 
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-5" style="min-height: 32rem;">
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-5 min-h-[32rem]">
     <div class="card !p-0 flex flex-col lg:col-span-1">
         <div class="flex items-center justify-between px-5 py-4 border-b border-border">
             <h2 class="card-title">Conversations</h2>

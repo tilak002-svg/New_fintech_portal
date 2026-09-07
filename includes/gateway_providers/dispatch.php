@@ -142,3 +142,33 @@ function create_gateway_payout(array $gateway, string $reference, string $amount
             throw new RuntimeException("No live payout integration exists for provider '{$gateway['provider']}'.");
     }
 }
+
+/**
+ * Reconciliation only (includes/reconciliation.php) — checks a gateway
+ * directly for a transaction's CURRENT status, for a pending transaction
+ * that never got a webhook. Never throws: any network/parsing failure or
+ * unsupported provider returns 'unknown', meaning "still don't know" —
+ * reconciliation must leave the transaction pending rather than ever
+ * guessing an outcome (see FR-010 / includes/payin_service.php).
+ *
+ * @param string $type 'deposit' (payin) or 'withdrawal' (payout) — the
+ *   transactions.type value, not the merchant-facing payin/payout name.
+ * @return string one of 'success', 'failed', 'pending', 'unknown'
+ */
+function check_gateway_transaction_status(array $gateway, string $type, string $gatewayTxnId): string
+{
+    try {
+        return match ($gateway['provider']) {
+            'razorpay' => $type === 'deposit'
+                ? razorpay_fetch_payin_status($gateway, $gatewayTxnId)
+                : razorpay_fetch_payout_status($gateway, $gatewayTxnId),
+            'cashfree' => $type === 'deposit'
+                ? cashfree_fetch_payin_status($gateway, $gatewayTxnId)
+                : cashfree_fetch_payout_status($gateway, $gatewayTxnId),
+            default => 'unknown',
+        };
+    } catch (Throwable $e) {
+        error_log('[reconciliation] status check failed for gateway ' . ($gateway['id'] ?? '?') . ': ' . $e->getMessage());
+        return 'unknown';
+    }
+}

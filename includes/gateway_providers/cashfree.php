@@ -255,6 +255,259 @@ function cashfree_payout_request(string $url, string $method, array $body, array
     return ['http_status' => $httpStatus, 'decoded' => json_decode((string) $response, true)];
 }
 
+/**
+ * Reconciliation only (includes/reconciliation.php) — GET /pg/orders/{id}
+ * (confirmed against Cashfree's docs) for a pay-in order's current
+ * order_status. Never throws — see razorpay_fetch_payin_status()'s
+ * docblock for why "don't know yet" must never become a guessed outcome.
+ *
+ * @return string one of 'success', 'failed', 'pending', 'unknown'
+ */
+function cashfree_fetch_payin_status(array $gateway, string $orderId): string
+{
+    $clientId = trim((string) ($gateway['public_key'] ?? ''));
+    if ($clientId === '' || empty($gateway['api_key_encrypted'])) {
+        return 'unknown';
+    }
+
+    try {
+        $clientSecret = gateway_decrypt_secret($gateway['api_key_encrypted']);
+    } catch (Throwable $e) {
+        return 'unknown';
+    }
+
+    $base = !empty($gateway['sandbox_mode']) ? CASHFREE_API_BASE_SANDBOX : CASHFREE_API_BASE_PRODUCTION;
+
+    $ch = curl_init($base . '/orders/' . rawurlencode($orderId));
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            'x-client-id: ' . $clientId,
+            'x-client-secret: ' . $clientSecret,
+            'x-api-version: ' . CASHFREE_API_VERSION,
+        ],
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT => 15,
+    ]);
+    $response = curl_exec($ch);
+    $curlErrno = curl_errno($ch);
+    $httpStatus = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($curlErrno !== 0 || $httpStatus < 200 || $httpStatus >= 300) {
+        return 'unknown';
+    }
+
+    $decoded = json_decode((string) $response, true);
+    return match ($decoded['order_status'] ?? '') {
+        'PAID' => 'success',
+        'EXPIRED', 'TERMINATED' => 'failed',
+        default => 'pending',
+    };
+}
+
+/**
+ * Reconciliation only — GET /payout/transfers?transfer_id={id} for a
+ * payout's current status. Same never-throws contract.
+ */
+function cashfree_fetch_payout_status(array $gateway, string $transferId): string
+{
+    $clientId = trim((string) ($gateway['public_key'] ?? ''));
+    if ($clientId === '' || empty($gateway['api_key_encrypted'])) {
+        return 'unknown';
+    }
+
+    try {
+        $clientSecret = gateway_decrypt_secret($gateway['api_key_encrypted']);
+    } catch (Throwable $e) {
+        return 'unknown';
+    }
+
+    $base = !empty($gateway['sandbox_mode']) ? CASHFREE_PAYOUT_API_BASE_SANDBOX : CASHFREE_PAYOUT_API_BASE_PRODUCTION;
+
+    $ch = curl_init($base . '/transfers?transfer_id=' . rawurlencode($transferId));
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            'x-client-id: ' . $clientId,
+            'x-client-secret: ' . $clientSecret,
+            'x-api-version: ' . CASHFREE_PAYOUT_API_VERSION,
+        ],
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT => 15,
+    ]);
+    $response = curl_exec($ch);
+    $curlErrno = curl_errno($ch);
+    $httpStatus = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($curlErrno !== 0 || $httpStatus < 200 || $httpStatus >= 300) {
+        return 'unknown';
+    }
+
+    $decoded = json_decode((string) $response, true);
+    $status = $decoded['status'] ?? ($decoded[0]['status'] ?? '');
+    return match ($status) {
+        'SUCCESS' => 'success',
+        'FAILED', 'REVERSED' => 'failed',
+        default => 'pending',
+    };
+}
+
+/**
+ * Maps a Cashfree dispute/chargeback webhook into the generic chargeback
+ * event shape process_chargeback_event() (includes/chargeback_service.php)
+ * understands. Returns null for anything that isn't a dispute event.
+ *
+ * IMPORTANT — best-effort mapping, same caveat this file's own header
+ * already makes for the payment/transfer webhook shapes above: modeled on
+ * Cashfree's published PG API conventions (a `type` field + nested
+ * `data.dispute` object, mirroring PAYMENT_*_WEBHOOK) but the exact event
+ * type strings and dispute object field names have NOT been confirmed
+ * against a live dispute webhook delivery from Cashfree's dashboard.
+ * Verify $disputeStatusMap and the field names read from
+ * $payload['data']['dispute'] against a real captured event (or Cashfree's
+ * current Disputes API docs) before relying on this for real disputes —
+ * signature verification and idempotency below are unaffected either way.
+ */
+function cashfree_parse_chargeback_webhook_payload(array $payload): ?array
+{
+    $type = (string) ($payload['type'] ?? '');
+    $dispute = $payload['data']['dispute'] ?? null;
+
+    if (!is_array($dispute) || !str_starts_with($type, 'DISPUTE_')) {
+        return null;
+    }
+
+    $disputeId = (string) ($dispute['dispute_id'] ?? $dispute['cf_dispute_id'] ?? '');
+    $orderId = (string) ($dispute['order_id'] ?? '');
+    if ($disputeId === '' || $orderId === '') {
+        return null;
+    }
+
+    $providerStatus = (string) ($dispute['dispute_status'] ?? $type);
+    $disputeStatusMap = [
+        'DISPUTE_CREATED' => 'open',
+        'OPEN' => 'open',
+        'ACTION_REQUIRED' => 'pending',
+        'UNDER_REVIEW' => 'pending',
+        'DISPUTE_WON' => 'won',
+        'WON' => 'won',
+        'DISPUTE_LOST' => 'lost',
+        'LOST' => 'lost',
+        'REVERSED' => 'reversed',
+    ];
+    $normalized = $disputeStatusMap[strtoupper($providerStatus)] ?? $disputeStatusMap[strtoupper($type)] ?? null;
+    if ($normalized === null) {
+        return null;
+    }
+
+    $occurredAt = cashfree_parse_timestamp($dispute['updated_at'] ?? $payload['event_time'] ?? null);
+
+    return [
+        // Cashfree doesn't send a distinct delivery/event id for disputes
+        // any more than it does for payments (see
+        // cashfree_parse_webhook_payload() above) — a dispute reaching a
+        // given status is itself a stable, naturally-deduplicating
+        // identifier for redelivery.
+        'gateway_event_id' => "{$disputeId}:{$providerStatus}",
+        'gateway_chargeback_id' => $disputeId,
+        'reference' => $orderId,
+        'event_type' => $type,
+        'normalized_status' => $normalized,
+        'provider_status' => $providerStatus,
+        'amount' => isset($dispute['dispute_amount']) ? (string) $dispute['dispute_amount'] : null,
+        'fee' => isset($dispute['dispute_fee']) ? (string) $dispute['dispute_fee'] : null,
+        'currency' => $dispute['currency'] ?? 'INR',
+        'reason_code' => $dispute['reason_code'] ?? null,
+        'reason' => $dispute['reason'] ?? null,
+        'occurred_at' => $occurredAt,
+        'due_at' => cashfree_parse_timestamp($dispute['respond_by'] ?? null),
+        'raw' => $payload,
+    ];
+}
+
+/**
+ * Reconciliation only (includes/reconciliation.php::reconcile_chargebacks())
+ * — fetches a single dispute's CURRENT status directly from Cashfree, for a
+ * chargeback we already have on file. Same never-throws / never-guess
+ * contract as cashfree_fetch_payin_status(): any failure returns null
+ * ("still don't know"), never a guessed outcome.
+ *
+ * IMPORTANT — best-effort endpoint, same caveat as
+ * cashfree_parse_chargeback_webhook_payload(): modeled on Cashfree's
+ * general GET-by-id resource convention (GET /pg/disputes/{dispute_id}),
+ * not confirmed against live docs. Verify before relying on this in
+ * production.
+ *
+ * @return array{provider_status: string, normalized_status: string}|null
+ */
+function cashfree_fetch_dispute_status(array $gateway, string $disputeId): ?array
+{
+    $clientId = trim((string) ($gateway['public_key'] ?? ''));
+    if ($clientId === '' || empty($gateway['api_key_encrypted'])) {
+        return null;
+    }
+
+    try {
+        $clientSecret = gateway_decrypt_secret($gateway['api_key_encrypted']);
+    } catch (Throwable $e) {
+        return null;
+    }
+
+    $base = !empty($gateway['sandbox_mode']) ? CASHFREE_API_BASE_SANDBOX : CASHFREE_API_BASE_PRODUCTION;
+
+    $ch = curl_init($base . '/disputes/' . rawurlencode($disputeId));
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            'x-client-id: ' . $clientId,
+            'x-client-secret: ' . $clientSecret,
+            'x-api-version: ' . CASHFREE_API_VERSION,
+        ],
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT => 15,
+    ]);
+    $response = curl_exec($ch);
+    $curlErrno = curl_errno($ch);
+    $httpStatus = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($curlErrno !== 0 || $httpStatus < 200 || $httpStatus >= 300) {
+        return null;
+    }
+
+    $decoded = json_decode((string) $response, true);
+    $providerStatus = (string) ($decoded['dispute_status'] ?? '');
+    if ($providerStatus === '') {
+        return null;
+    }
+
+    $disputeStatusMap = [
+        'DISPUTE_CREATED' => 'open', 'OPEN' => 'open',
+        'ACTION_REQUIRED' => 'pending', 'UNDER_REVIEW' => 'pending',
+        'DISPUTE_WON' => 'won', 'WON' => 'won',
+        'DISPUTE_LOST' => 'lost', 'LOST' => 'lost',
+        'REVERSED' => 'reversed',
+    ];
+    $normalized = $disputeStatusMap[strtoupper($providerStatus)] ?? null;
+    if ($normalized === null) {
+        return null;
+    }
+
+    return ['provider_status' => $providerStatus, 'normalized_status' => $normalized];
+}
+
+/** Parses a Cashfree ISO-ish timestamp string into 'Y-m-d H:i:s' UTC, or null if absent/unparseable. */
+function cashfree_parse_timestamp(?string $raw): ?string
+{
+    if (!$raw) {
+        return null;
+    }
+    $ts = strtotime($raw);
+    return $ts !== false ? gmdate('Y-m-d H:i:s', $ts) : null;
+}
+
 function cashfree_verify_webhook_signature(string $rawBody, string $timestampHeader, string $signatureHeader, string $secret): bool
 {
     if ($timestampHeader === '' || $signatureHeader === '' || $secret === '') {

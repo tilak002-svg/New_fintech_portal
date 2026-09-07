@@ -246,6 +246,105 @@ function razorpay_x_post(string $path, array $body, string $auth, string $action
     throw new RuntimeException("Razorpay refused to {$actionDescription}: {$reason}");
 }
 
+/**
+ * Reconciliation only (includes/reconciliation.php) — polls Razorpay
+ * directly for a pay-in order's current state instead of waiting for a
+ * webhook. GET /v1/orders/{id}/payments (confirmed against Razorpay's
+ * docs) lists every payment attempt against that order; the most recent
+ * one's status decides the outcome. Never throws — a network error or
+ * unparseable response means "don't know yet", not "failed", so this
+ * returns 'unknown' rather than raising, keeping the ambiguous-outcome
+ * rule (see includes/payin_service.php) intact for reconciliation too.
+ *
+ * @return string one of 'success', 'failed', 'pending', 'unknown'
+ */
+function razorpay_fetch_payin_status(array $gateway, string $orderId): string
+{
+    $keyId = trim((string) ($gateway['public_key'] ?? ''));
+    if ($keyId === '' || empty($gateway['api_key_encrypted'])) {
+        return 'unknown';
+    }
+
+    try {
+        $keySecret = gateway_decrypt_secret($gateway['api_key_encrypted']);
+    } catch (Throwable $e) {
+        return 'unknown';
+    }
+
+    $ch = curl_init(RAZORPAY_API_BASE . '/orders/' . rawurlencode($orderId) . '/payments');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_USERPWD => $keyId . ':' . $keySecret,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT => 15,
+    ]);
+    $response = curl_exec($ch);
+    $curlErrno = curl_errno($ch);
+    $httpStatus = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($curlErrno !== 0 || $httpStatus < 200 || $httpStatus >= 300) {
+        return 'unknown';
+    }
+
+    $decoded = json_decode((string) $response, true);
+    $items = $decoded['items'] ?? null;
+    if (!is_array($items) || !$items) {
+        return 'pending';
+    }
+
+    // Razorpay orders back multiple payment attempts if the first ones
+    // fail — the customer's own end-customer retrying on the same hosted
+    // checkout. The latest attempt is what matters.
+    $latest = $items[0];
+    return match ($latest['status'] ?? '') {
+        'captured' => 'success',
+        'failed' => 'failed',
+        default => 'pending',
+    };
+}
+
+/**
+ * Reconciliation only — GET /v1/payouts/{id} for a payout's current
+ * status. Same never-throws contract as razorpay_fetch_payin_status().
+ */
+function razorpay_fetch_payout_status(array $gateway, string $payoutId): string
+{
+    $keyId = trim((string) ($gateway['public_key'] ?? ''));
+    if ($keyId === '' || empty($gateway['api_key_encrypted'])) {
+        return 'unknown';
+    }
+
+    try {
+        $keySecret = gateway_decrypt_secret($gateway['api_key_encrypted']);
+    } catch (Throwable $e) {
+        return 'unknown';
+    }
+
+    $ch = curl_init(RAZORPAY_API_BASE . '/payouts/' . rawurlencode($payoutId));
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_USERPWD => $keyId . ':' . $keySecret,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT => 15,
+    ]);
+    $response = curl_exec($ch);
+    $curlErrno = curl_errno($ch);
+    $httpStatus = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($curlErrno !== 0 || $httpStatus < 200 || $httpStatus >= 300) {
+        return 'unknown';
+    }
+
+    $decoded = json_decode((string) $response, true);
+    return match ($decoded['status'] ?? '') {
+        'processed' => 'success',
+        'reversed', 'cancelled', 'rejected' => 'failed',
+        default => 'pending',
+    };
+}
+
 function razorpay_verify_webhook_signature(string $rawBody, string $signatureHeader, string $secret): bool
 {
     if ($signatureHeader === '' || $secret === '') {

@@ -190,6 +190,61 @@ render_hero_banner(
     </form>
 </dialog>
 
+<!-- Credentials reveal — shown once, right after Add customer succeeds.
+     Customers have no self-service password reset — these admin-issued
+     credentials are the only way in, so this is the admin's only chance
+     to copy them and relay them to the customer themselves. -->
+<dialog id="credentials-reveal-modal"
+        class="rounded-md p-0 backdrop:bg-black/40 w-full max-w-md"
+        aria-labelledby="credentials-reveal-title">
+
+    <div class="flex flex-col">
+        <div class="flex items-start justify-between gap-4 px-6 py-5 border-b border-border">
+            <div class="flex items-center gap-2.5">
+                <span class="icon-chip-md icon-chip-success"><?= icon('check-circle', 'w-4 h-4') ?></span>
+                <h2 id="credentials-reveal-title" class="text-3xl font-semibold text-text-primary">Customer created</h2>
+            </div>
+            <button type="button" class="btn-icon" data-modal-close aria-label="Close dialog">
+                <?= icon('close', 'w-5 h-5') ?>
+            </button>
+        </div>
+
+        <div class="px-6 py-5 space-y-4">
+            <div class="rounded-md border border-warning/30 bg-warning-bg px-4 py-3 flex items-start gap-2.5">
+                <?= icon('shield', 'w-5 h-5 text-warning shrink-0 mt-0.5') ?>
+                <p class="text-sm text-text-primary"><strong>Save these credentials now.</strong> The temporary password won't be shown again after you close this — there's no email integration configured, so relaying it to the customer is on you.</p>
+            </div>
+
+            <div>
+                <label class="field-label">Customer login URL</label>
+                <div class="flex gap-2">
+                    <input type="text" id="cr-login-url" class="field-input font-mono text-sm flex-1" readonly>
+                    <button type="button" class="btn-icon cr-copy-btn" data-copy-target="cr-login-url" aria-label="Copy"><?= icon('copy', 'w-4 h-4 cr-copy-icon-default') ?><?= icon('check-circle', 'w-4 h-4 cr-copy-icon-copied hidden text-success') ?></button>
+                </div>
+            </div>
+            <div>
+                <label class="field-label">Email</label>
+                <div class="flex gap-2">
+                    <input type="text" id="cr-email" class="field-input font-mono text-sm flex-1" readonly>
+                    <button type="button" class="btn-icon cr-copy-btn" data-copy-target="cr-email" aria-label="Copy"><?= icon('copy', 'w-4 h-4 cr-copy-icon-default') ?><?= icon('check-circle', 'w-4 h-4 cr-copy-icon-copied hidden text-success') ?></button>
+                </div>
+            </div>
+            <div>
+                <label class="field-label">Temporary password</label>
+                <div class="flex gap-2">
+                    <input type="text" id="cr-password" class="field-input font-mono text-sm flex-1" readonly>
+                    <button type="button" class="btn-icon cr-copy-btn" data-copy-target="cr-password" aria-label="Copy"><?= icon('copy', 'w-4 h-4 cr-copy-icon-default') ?><?= icon('check-circle', 'w-4 h-4 cr-copy-icon-copied hidden text-success') ?></button>
+                </div>
+            </div>
+            <button type="button" id="cr-copy-all" class="btn-secondary w-full"><?= icon('copy', 'w-4 h-4') ?> Copy all as text</button>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-border bg-surface-muted rounded-b-md">
+            <button type="button" class="btn-primary" data-modal-close>Done</button>
+        </div>
+    </div>
+</dialog>
+
 <?php
 
 render_modal(

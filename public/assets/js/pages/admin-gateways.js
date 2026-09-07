@@ -149,7 +149,18 @@
                         ${g.is_default
                             ? '<span class="badge-info">Default</span>'
                             : ''}
+                        ${g.is_mock
+                            ? '<span class="badge-warning">Mock/test</span>'
+                            : ''}
                     </span>
+
+                    ${(!g.payin_enabled || !g.payout_enabled)
+                        ? `
+                            <span class="block text-xs text-text-secondary mt-0.5">
+                                ${!g.payin_enabled ? 'PayIn disabled' : ''}${!g.payin_enabled && !g.payout_enabled ? ' · ' : ''}${!g.payout_enabled ? 'PayOut disabled' : ''}
+                            </span>
+                        `
+                        : ''}
 
                     <span class="block text-sm text-text-secondary mt-0.5">
                         Added ${timeLabel(g.created_at)}
@@ -180,6 +191,13 @@
                                 ${formatMoney(g.remaining_today)} remaining · ${g.transaction_count_today} txns today
                             </span>
                         `}
+                    ${(g.min_ticket_size !== null || g.max_ticket_size !== null)
+                        ? `
+                            <span class="block text-text-secondary mt-0.5">
+                                Ticket: ${g.min_ticket_size === null ? 'no min' : formatMoney(g.min_ticket_size)} – ${g.max_ticket_size === null ? 'no max' : formatMoney(g.max_ticket_size)}
+                            </span>
+                        `
+                        : ''}
                 </td>
 
                 <td>
@@ -214,7 +232,15 @@
                                 data-id="${g.id}"
                                 data-name="${escapeHtml(g.display_name)}"
                                 data-priority="${g.priority}"
-                                data-daily-limit="${g.daily_limit_amount ?? ''}">
+                                data-daily-limit="${g.daily_limit_amount ?? ''}"
+                                data-hourly-limit="${g.hourly_limit_amount ?? ''}"
+                                data-monthly-limit="${g.monthly_limit_amount ?? ''}"
+                                data-per-transaction-limit="${g.per_transaction_limit_amount ?? ''}"
+                                data-min-ticket="${g.min_ticket_size ?? ''}"
+                                data-max-ticket="${g.max_ticket_size ?? ''}"
+                                data-payin-enabled="${g.payin_enabled}"
+                                data-payout-enabled="${g.payout_enabled}"
+                                data-is-mock="${g.is_mock}">
                             Limits
                         </button>
 
@@ -398,6 +424,14 @@
 
                 document.getElementById('el-priority').value = btn.dataset.priority;
                 document.getElementById('el-daily-limit').value = btn.dataset.dailyLimit;
+                document.getElementById('el-hourly-limit').value = btn.dataset.hourlyLimit;
+                document.getElementById('el-monthly-limit').value = btn.dataset.monthlyLimit;
+                document.getElementById('el-per-transaction-limit').value = btn.dataset.perTransactionLimit;
+                document.getElementById('el-min-ticket').value = btn.dataset.minTicket;
+                document.getElementById('el-max-ticket').value = btn.dataset.maxTicket;
+                document.getElementById('el-payin-enabled').checked = btn.dataset.payinEnabled === 'true';
+                document.getElementById('el-payout-enabled').checked = btn.dataset.payoutEnabled === 'true';
+                document.getElementById('el-is-mock').checked = btn.dataset.isMock === 'true';
                 document.getElementById('el-error').classList.add('hidden');
 
                 openModal('edit-limits-modal');
@@ -594,6 +628,11 @@
             const id = e.target.dataset.id;
             const submitBtn = document.getElementById('el-submit');
             const dailyLimitRaw = document.getElementById('el-daily-limit').value.trim();
+            const hourlyLimitRaw = document.getElementById('el-hourly-limit').value.trim();
+            const monthlyLimitRaw = document.getElementById('el-monthly-limit').value.trim();
+            const perTransactionLimitRaw = document.getElementById('el-per-transaction-limit').value.trim();
+            const minTicketRaw = document.getElementById('el-min-ticket').value.trim();
+            const maxTicketRaw = document.getElementById('el-max-ticket').value.trim();
 
             setButtonLoading(submitBtn, true);
 
@@ -607,7 +646,15 @@
                     body: {
                         id,
                         priority: document.getElementById('el-priority').value,
-                        daily_limit_amount: dailyLimitRaw === '' ? null : dailyLimitRaw
+                        daily_limit_amount: dailyLimitRaw === '' ? null : dailyLimitRaw,
+                        hourly_limit_amount: hourlyLimitRaw === '' ? null : hourlyLimitRaw,
+                        monthly_limit_amount: monthlyLimitRaw === '' ? null : monthlyLimitRaw,
+                        per_transaction_limit_amount: perTransactionLimitRaw === '' ? null : perTransactionLimitRaw,
+                        min_ticket_size: minTicketRaw === '' ? null : minTicketRaw,
+                        max_ticket_size: maxTicketRaw === '' ? null : maxTicketRaw,
+                        payin_enabled: document.getElementById('el-payin-enabled').checked,
+                        payout_enabled: document.getElementById('el-payout-enabled').checked,
+                        is_mock: document.getElementById('el-is-mock').checked
                     }
                 }
             );

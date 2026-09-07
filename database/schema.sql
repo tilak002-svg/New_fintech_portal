@@ -7,6 +7,11 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     role ENUM('customer', 'operator', 'admin') NOT NULL DEFAULT 'customer',
     status ENUM('active', 'suspended') NOT NULL DEFAULT 'active',
+    -- Forces a customer created by admin (with an admin-chosen temporary
+    -- password) to set their own password before reaching anything else.
+    -- Enforced in public/index.php's routing; cleared by
+    -- public/api/settings/change-password.php on a successful change.
+    must_change_password TINYINT(1) NOT NULL DEFAULT 0,
     avatar_initials VARCHAR(4) NULL,
     gender ENUM('male', 'female', 'other') NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -31,6 +36,10 @@ CREATE TABLE wallets (
     user_id INT UNSIGNED NOT NULL,
     available_balance DECIMAL(18,2) NOT NULL DEFAULT 0.00,
     pending_balance DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+    -- Outstanding chargeback liability that exceeded available_balance at
+    -- the time it was applied — see database/migration19.sql and
+    -- includes/chargeback_service.php.
+    receivable_balance DECIMAL(18,2) NOT NULL DEFAULT 0.00,
     currency CHAR(3) NOT NULL DEFAULT 'INR',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_wallets_user (user_id),
@@ -79,8 +88,27 @@ CREATE TABLE payment_gateways (
     auto_paused_until DATETIME NULL,
     status ENUM('active', 'inactive') NOT NULL DEFAULT 'inactive',
     is_default TINYINT(1) NOT NULL DEFAULT 0,
+    -- Selection eligibility, not just capacity: a gateway missing either
+    -- flag is skipped for that direction entirely (see
+    -- includes/gateway_selector.php), independent of whether it has
+    -- capacity remaining.
+    payin_enabled TINYINT(1) NOT NULL DEFAULT 1,
+    payout_enabled TINYINT(1) NOT NULL DEFAULT 1,
+    -- Explicit, admin-visible opt-in for the local instant-success
+    -- simulated path (create_payin()/create_payout()'s no-live-gateway
+    -- branch) — the ONLY condition that path may trigger under. A gateway
+    -- claiming a real provider but missing/invalid credentials is never
+    -- silently mocked; it's simply ineligible for selection.
+    is_mock TINYINT(1) NOT NULL DEFAULT 0,
     priority INT UNSIGNED NOT NULL DEFAULT 100,
     daily_limit_amount DECIMAL(18,2) NULL,
+    hourly_limit_amount DECIMAL(18,2) NULL,
+    monthly_limit_amount DECIMAL(18,2) NULL,
+    per_transaction_limit_amount DECIMAL(18,2) NULL,
+    -- Ticket-size band — distinct from per_transaction_limit_amount (a hard
+    -- ceiling only). NULL means no floor/ceiling on that side.
+    min_ticket_size DECIMAL(18,2) NULL,
+    max_ticket_size DECIMAL(18,2) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     KEY idx_payment_gateways_priority (status, priority)
@@ -101,11 +129,39 @@ CREATE TABLE transactions (
     gateway_id INT UNSIGNED NULL,
     gateway_txn_id VARCHAR(120) NULL,
     idempotency_key VARCHAR(64) NULL,
+    -- Merchant PayIn/PayOut API fields (see includes/payin_service.php,
+    -- includes/payout_service.php). NULL for every legacy deposit/withdrawal
+    -- row created via the browser-session flow. merchant_order_id is the
+    -- merchant's OWN order reference (distinct from `reference`/
+    -- `idempotency_key`, which are Verapay-internal) — see
+    -- uq_transactions_merchant_order below. end_customer_* is populated for
+    -- a PayIn (who paid); beneficiary_* is populated for a PayOut (who was
+    -- paid) and is a per-request snapshot, deliberately not sourced from
+    -- settlement_banks (which is the merchant's OWN bank, reserved for a
+    -- future Settlements feature — see docs/plan for the pivot).
+    merchant_order_id VARCHAR(120) NULL,
+    end_customer_name VARCHAR(120) NULL,
+    end_customer_email VARCHAR(190) NULL,
+    end_customer_phone VARCHAR(20) NULL,
+    beneficiary_name VARCHAR(120) NULL,
+    beneficiary_account_number VARCHAR(40) NULL,
+    beneficiary_ifsc VARCHAR(20) NULL,
+    beneficiary_bank_name VARCHAR(120) NULL,
+    beneficiary_phone VARCHAR(20) NULL,
+    beneficiary_address VARCHAR(255) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    -- Reconciliation visibility for pending transactions — see
+    -- includes/reconciliation.php / bin/reconcile-pending.php.
+    last_reconciled_at DATETIME NULL,
+    reconciliation_attempts INT UNSIGNED NOT NULL DEFAULT 0,
     UNIQUE KEY uq_transactions_reference (reference),
     UNIQUE KEY uq_transactions_idempotency_key (idempotency_key),
     UNIQUE KEY uq_transactions_gateway_txn (gateway_id, gateway_txn_id),
+    -- NULL repeats freely under a MySQL UNIQUE index, so this only takes
+    -- effect for merchant-API-created rows (merchant_order_id NOT NULL) —
+    -- a no-op for every legacy deposit/withdrawal row.
+    UNIQUE KEY uq_transactions_merchant_order (user_id, merchant_order_id),
     KEY idx_transactions_user (user_id, created_at),
     KEY idx_transactions_type_status (type, status),
     CONSTRAINT fk_transactions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -164,6 +220,31 @@ CREATE TABLE gateway_daily_usage (
     CONSTRAINT fk_gateway_daily_usage_gateway FOREIGN KEY (gateway_id) REFERENCES payment_gateways(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- One row per gateway per hour (usage_hour = the hour bucket's start).
+-- Same locking pattern as gateway_daily_usage.
+CREATE TABLE gateway_hourly_usage (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    gateway_id INT UNSIGNED NOT NULL,
+    usage_hour DATETIME NOT NULL,
+    used_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+    transaction_count INT UNSIGNED NOT NULL DEFAULT 0,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_gateway_hourly_usage (gateway_id, usage_hour),
+    CONSTRAINT fk_gateway_hourly_usage_gateway FOREIGN KEY (gateway_id) REFERENCES payment_gateways(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One row per gateway per calendar month (usage_month = 'YYYY-MM').
+CREATE TABLE gateway_monthly_usage (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    gateway_id INT UNSIGNED NOT NULL,
+    usage_month CHAR(7) NOT NULL,
+    used_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+    transaction_count INT UNSIGNED NOT NULL DEFAULT 0,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_gateway_monthly_usage (gateway_id, usage_month),
+    CONSTRAINT fk_gateway_monthly_usage_gateway FOREIGN KEY (gateway_id) REFERENCES payment_gateways(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Raw inbound gateway webhook deliveries. gateway_id + event_id is the
 -- idempotency key: a re-delivered webhook for an event already recorded
 -- here is a no-op instead of crediting the wallet a second time.
@@ -194,6 +275,23 @@ CREATE TABLE audit_logs (
     KEY idx_audit_actor (actor_id, created_at),
     KEY idx_audit_target (target_type, target_id),
     CONSTRAINT fk_audit_actor FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Raw API request log — distinct from audit_logs (admin/customer ACTIONS).
+-- Written only for bearer-token-authenticated requests — see
+-- includes/auth.php::authenticate_via_bearer_token() and
+-- includes/functions.php::json_response().
+CREATE TABLE api_logs (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id INT UNSIGNED NOT NULL,
+    method VARCHAR(10) NOT NULL,
+    endpoint VARCHAR(190) NOT NULL,
+    http_status SMALLINT UNSIGNED NOT NULL,
+    ip_address VARCHAR(45) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_api_logs_user (user_id, created_at),
+    KEY idx_api_logs_created (created_at),
+    CONSTRAINT fk_api_logs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE merchant_profiles (
@@ -286,6 +384,10 @@ CREATE TABLE customer_api_credentials (
     -- (see includes/gateway_secrets.php) since, unlike secret_key, this one
     -- genuinely needs to be decrypted server-side on every outbound delivery.
     webhook_signing_secret_encrypted TEXT NULL,
+    -- Set only from a client-confirmed successful run of the Key/API
+    -- Verification page (pages/key-verification.php) — informational UI
+    -- state, not itself a security check.
+    last_verified_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_customer_api_credentials_user (user_id),
@@ -314,4 +416,164 @@ CREATE TABLE platform_whitelisted_ips (
     ip_address VARCHAR(45) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_platform_whitelisted_ips_ip (ip_address)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Hosted-checkout session for the merchant PayIn API (includes/payin_service.php).
+-- create_gateway_order() returns a provider-shaped payload (Razorpay
+-- order_id/key_id, Cashfree payment_session_id) that must never reach a
+-- merchant's own API response — that would mean the merchant is integrating
+-- the underlying gateway directly, which this platform exists to prevent.
+-- Instead that payload is stashed here, keyed by an unguessable
+-- session_token, and the merchant is handed a Verapay-hosted payment_url
+-- (see pages/pay-checkout.php) that renders it out to their end-customer.
+-- Single admin-editable override for the API Base URL shown to every
+-- customer (Settings/API Access, API documentation). NULL api_base_url
+-- means "no override configured yet" — every reader falls back to
+-- APP_URL + /api/v1 (see includes/functions.php's platform_api_base_url()).
+CREATE TABLE platform_settings (
+    id TINYINT UNSIGNED PRIMARY KEY DEFAULT 1,
+    api_base_url VARCHAR(255) NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT chk_platform_settings_singleton CHECK (id = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Outbound customer webhook delivery queue with retry/backoff — see
+-- includes/customer_webhooks.php. One row per delivery ATTEMPT SERIES for
+-- one transaction event; attempts/last_http_status/last_error describe
+-- the most recent try.
+CREATE TABLE customer_webhook_deliveries (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    transaction_id INT UNSIGNED NOT NULL,
+    user_id INT UNSIGNED NOT NULL,
+    event VARCHAR(60) NOT NULL,
+    url VARCHAR(255) NOT NULL,
+    payload JSON NOT NULL,
+    attempts INT UNSIGNED NOT NULL DEFAULT 0,
+    max_attempts INT UNSIGNED NOT NULL DEFAULT 5,
+    status ENUM('pending', 'delivered', 'failed') NOT NULL DEFAULT 'pending',
+    last_http_status SMALLINT NULL,
+    last_error VARCHAR(255) NULL,
+    next_attempt_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_cwd_status_next (status, next_attempt_at),
+    KEY idx_cwd_transaction (transaction_id),
+    CONSTRAINT fk_cwd_transaction FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_cwd_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Generic rate-limit counter, shared by every endpoint that needs one
+-- (password reset, API token exchange, PayIn/PayOut creation, ...) rather
+-- than a dedicated table per endpoint.
+CREATE TABLE rate_limit_hits (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    rate_key VARCHAR(190) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_rate_limit_lookup (rate_key, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Forgot/reset-password flow. Tokens are single-use, short-lived, and
+-- stored only as a hash (same principle as customer_api_credentials'
+-- secret_key_hash) — the raw token exists only in the emailed/returned
+-- link, never in the database.
+CREATE TABLE password_resets (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id INT UNSIGNED NOT NULL,
+    token_hash VARCHAR(255) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_password_resets_user (user_id),
+    KEY idx_password_resets_expires (expires_at),
+    CONSTRAINT fk_password_resets_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE payment_sessions (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    session_token CHAR(64) NOT NULL,
+    transaction_id INT UNSIGNED NOT NULL,
+    gateway_id INT UNSIGNED NOT NULL,
+    checkout_payload JSON NOT NULL,
+    return_url VARCHAR(255) NULL,
+    status ENUM('created', 'completed', 'expired', 'cancelled') NOT NULL DEFAULT 'created',
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_payment_sessions_token (session_token),
+    KEY idx_payment_sessions_transaction (transaction_id),
+    CONSTRAINT fk_payment_sessions_transaction FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_payment_sessions_gateway FOREIGN KEY (gateway_id) REFERENCES payment_gateways(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Chargeback / dispute lifecycle — see database/migration19.sql for the
+-- full rationale (immutable ledger, event-level idempotency, out-of-order
+-- protection) and includes/chargeback_service.php for the state machine.
+CREATE TABLE wallet_ledger (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id INT UNSIGNED NOT NULL,
+    entry_type VARCHAR(40) NOT NULL,
+    reference_type VARCHAR(40) NOT NULL,
+    reference_id INT UNSIGNED NOT NULL,
+    amount DECIMAL(18,2) NOT NULL,
+    available_balance_after DECIMAL(18,2) NOT NULL,
+    receivable_balance_after DECIMAL(18,2) NOT NULL,
+    currency CHAR(3) NOT NULL DEFAULT 'INR',
+    description VARCHAR(255) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_wallet_ledger_user (user_id, created_at),
+    KEY idx_wallet_ledger_reference (reference_type, reference_id),
+    CONSTRAINT fk_wallet_ledger_user FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE chargebacks (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    transaction_id INT UNSIGNED NOT NULL,
+    user_id INT UNSIGNED NOT NULL,
+    gateway_id INT UNSIGNED NULL,
+    provider VARCHAR(40) NOT NULL,
+    gateway_chargeback_id VARCHAR(120) NOT NULL,
+    gateway_reference VARCHAR(120) NULL,
+    amount DECIMAL(18,2) NOT NULL,
+    fee DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+    total_amount DECIMAL(18,2) NOT NULL,
+    currency CHAR(3) NOT NULL DEFAULT 'INR',
+    reason_code VARCHAR(60) NULL,
+    reason VARCHAR(255) NULL,
+    status ENUM('open', 'pending', 'won', 'lost', 'reversed', 'cancelled') NOT NULL DEFAULT 'open',
+    provider_status VARCHAR(60) NULL,
+    financial_impact_applied_at DATETIME NULL,
+    last_event_at DATETIME NULL,
+    initiated_at DATETIME NULL,
+    due_at DATETIME NULL,
+    resolved_at DATETIME NULL,
+    resolution VARCHAR(255) NULL,
+    metadata JSON NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_chargebacks_provider_dispute (provider, gateway_chargeback_id),
+    KEY idx_chargebacks_transaction (transaction_id),
+    KEY idx_chargebacks_user (user_id, status),
+    KEY idx_chargebacks_status (status),
+    CONSTRAINT fk_chargebacks_transaction FOREIGN KEY (transaction_id) REFERENCES transactions(id),
+    CONSTRAINT fk_chargebacks_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT fk_chargebacks_gateway FOREIGN KEY (gateway_id) REFERENCES payment_gateways(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE chargeback_events (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    chargeback_id INT UNSIGNED NULL,
+    provider VARCHAR(40) NOT NULL,
+    gateway_chargeback_id VARCHAR(120) NOT NULL,
+    gateway_event_id VARCHAR(150) NOT NULL,
+    event_type VARCHAR(60) NOT NULL,
+    provider_status VARCHAR(60) NULL,
+    normalized_status VARCHAR(20) NULL,
+    applied TINYINT(1) NOT NULL DEFAULT 0,
+    skip_reason VARCHAR(120) NULL,
+    payload JSON NULL,
+    occurred_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_chargeback_events_event (provider, gateway_event_id),
+    KEY idx_chargeback_events_chargeback (chargeback_id),
+    CONSTRAINT fk_chargeback_events_chargeback FOREIGN KEY (chargeback_id) REFERENCES chargebacks(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -13,6 +13,7 @@
  */
 
 require_once __DIR__ . '/money.php';
+require_once __DIR__ . '/gateway_providers/dispatch.php';
 
 // Circuit breaker: this many consecutive definite failures on a gateway
 // (see record_gateway_outcome()) auto-excludes it from selection for the
@@ -24,28 +25,53 @@ const GATEWAY_AUTO_PAUSE_FAILURE_THRESHOLD = 3;
 const GATEWAY_AUTO_PAUSE_MINUTES = 15;
 
 /**
- * Picks the highest-priority active gateway with enough remaining daily
- * capacity for $amount, and atomically reserves that capacity against it.
+ * Picks the highest-priority active gateway with enough remaining capacity
+ * for $amount across every configured limit window, and atomically
+ * reserves that capacity against it.
  *
- * Concurrency: for each candidate gateway, the per-day usage row is
- * created if missing (INSERT IGNORE) and then locked with SELECT ... FOR
- * UPDATE before its used_amount is read. Two concurrent requests racing
- * for the same gateway/day serialize on that row lock — the second request
- * only sees "remaining capacity" after the first has committed its
- * reservation, so the configured daily_limit_amount can never be
+ * Concurrency: for each candidate gateway, each applicable usage row
+ * (daily/hourly/monthly) is created if missing (INSERT IGNORE) and then
+ * locked with SELECT ... FOR UPDATE before its used_amount is read. Two
+ * concurrent requests racing for the same gateway/window serialize on that
+ * row lock — the second request only sees "remaining capacity" after the
+ * first has committed its reservation, so no configured limit can ever be
  * oversubscribed.
  *
+ * Order matters: every window is locked and checked BEFORE any of them is
+ * written — a gateway is only ever reserved against once it's confirmed to
+ * fit ALL applicable limits, never partially (e.g. incrementing daily usage
+ * for a gateway that then turns out to be over its monthly limit).
+ * per_transaction_limit_amount is checked first since it needs no lock —
+ * cheapest rejection, done before touching the database at all.
+ *
+ * @param string $direction 'payin' or 'payout' — gates on payin_enabled/
+ *   payout_enabled and, for a non-mock gateway, on that direction's real
+ *   provider credentials (see the is_mock/credential-completeness check
+ *   in the loop below).
  * @return array{gateway: array|null, reason: string|null} reason is one of
- *   null (success), 'no_active_gateways', or 'all_gateways_at_limit'.
+ *   null (success), 'no_active_gateways', or 'no_eligible_gateway' (covers
+ *   every per-candidate skip below: direction disabled, ticket size out of
+ *   range, capacity exhausted, or a real-provider gateway with no usable
+ *   credentials).
  */
-function select_and_reserve_gateway(PDO $pdo, string $amount): array
+function select_and_reserve_gateway(PDO $pdo, string $amount, bool $sandboxOnly = false, string $direction = 'payin'): array
 {
+    // $sandboxOnly is additive and used only by the API docs' "Try it"
+    // tester (see public/api/v1/try/*.php) — every existing caller omits
+    // it and sees no behavior change. It exists because create_payin()/
+    // create_payout() commit their own DB transaction and call the
+    // provider only after commit, so gateway selection is the only safe
+    // place to guarantee a test request can never reach a live gateway.
+    $directionColumn = $direction === 'payout' ? 'payout_enabled' : 'payin_enabled';
     $gatewaysStmt = $pdo->prepare(
-        'SELECT id, display_name, provider, priority, daily_limit_amount, public_key, api_key_encrypted, payout_account_number, sandbox_mode
+        "SELECT id, display_name, provider, priority, daily_limit_amount, hourly_limit_amount, monthly_limit_amount, per_transaction_limit_amount,
+                min_ticket_size, max_ticket_size, public_key, api_key_encrypted, payout_account_number, sandbox_mode, is_mock
          FROM payment_gateways
-         WHERE status = "active"
-           AND (auto_paused_until IS NULL OR auto_paused_until <= UTC_TIMESTAMP())
-         ORDER BY priority ASC, id ASC'
+         WHERE status = \"active\"
+           AND {$directionColumn} = 1
+           AND (auto_paused_until IS NULL OR auto_paused_until <= UTC_TIMESTAMP())"
+        . ($sandboxOnly ? ' AND sandbox_mode = 1' : '') .
+        ' ORDER BY priority ASC, id ASC'
     );
     $gatewaysStmt->execute();
     $gateways = $gatewaysStmt->fetchAll();
@@ -55,52 +81,100 @@ function select_and_reserve_gateway(PDO $pdo, string $amount): array
     }
 
     $today = gmdate('Y-m-d');
+    $thisHour = gmdate('Y-m-d H:00:00');
+    $thisMonth = gmdate('Y-m');
 
-    $insertUsage = $pdo->prepare(
-        'INSERT IGNORE INTO gateway_daily_usage (gateway_id, usage_date, used_amount, transaction_count)
-         VALUES (?, ?, 0.00, 0)'
-    );
-    $lockUsage = $pdo->prepare(
-        'SELECT used_amount FROM gateway_daily_usage WHERE gateway_id = ? AND usage_date = ? FOR UPDATE'
-    );
-    $reserveUsage = $pdo->prepare(
-        'UPDATE gateway_daily_usage SET used_amount = ?, transaction_count = transaction_count + 1
-         WHERE gateway_id = ? AND usage_date = ?'
-    );
+    $insertDaily = $pdo->prepare('INSERT IGNORE INTO gateway_daily_usage (gateway_id, usage_date, used_amount, transaction_count) VALUES (?, ?, 0.00, 0)');
+    $lockDaily = $pdo->prepare('SELECT used_amount FROM gateway_daily_usage WHERE gateway_id = ? AND usage_date = ? FOR UPDATE');
+    $reserveDaily = $pdo->prepare('UPDATE gateway_daily_usage SET used_amount = ?, transaction_count = transaction_count + 1 WHERE gateway_id = ? AND usage_date = ?');
+
+    $insertHourly = $pdo->prepare('INSERT IGNORE INTO gateway_hourly_usage (gateway_id, usage_hour, used_amount, transaction_count) VALUES (?, ?, 0.00, 0)');
+    $lockHourly = $pdo->prepare('SELECT used_amount FROM gateway_hourly_usage WHERE gateway_id = ? AND usage_hour = ? FOR UPDATE');
+    $reserveHourly = $pdo->prepare('UPDATE gateway_hourly_usage SET used_amount = ?, transaction_count = transaction_count + 1 WHERE gateway_id = ? AND usage_hour = ?');
+
+    $insertMonthly = $pdo->prepare('INSERT IGNORE INTO gateway_monthly_usage (gateway_id, usage_month, used_amount, transaction_count) VALUES (?, ?, 0.00, 0)');
+    $lockMonthly = $pdo->prepare('SELECT used_amount FROM gateway_monthly_usage WHERE gateway_id = ? AND usage_month = ? FOR UPDATE');
+    $reserveMonthly = $pdo->prepare('UPDATE gateway_monthly_usage SET used_amount = ?, transaction_count = transaction_count + 1 WHERE gateway_id = ? AND usage_month = ?');
 
     foreach ($gateways as $gateway) {
         $gatewayId = (int) $gateway['id'];
 
-        $insertUsage->execute([$gatewayId, $today]);
-        $lockUsage->execute([$gatewayId, $today]);
-        $usageRow = $lockUsage->fetch();
-        $used = $usageRow['used_amount'] ?? '0.00';
-
-        $limit = $gateway['daily_limit_amount'];
-        $projected = money_add($used, $amount);
-
-        if ($limit !== null && money_cmp($projected, $limit) > 0) {
+        if ($gateway['per_transaction_limit_amount'] !== null && money_cmp($amount, $gateway['per_transaction_limit_amount']) > 0) {
+            continue;
+        }
+        // Ticket-size band — a distinct restriction from the hard ceiling
+        // above (e.g. "this gateway only handles ₹100-₹25,000 transactions",
+        // regardless of any per-transaction cap or remaining capacity).
+        if ($gateway['min_ticket_size'] !== null && money_cmp($amount, $gateway['min_ticket_size']) < 0) {
+            continue;
+        }
+        if ($gateway['max_ticket_size'] !== null && money_cmp($amount, $gateway['max_ticket_size']) > 0) {
             continue;
         }
 
-        $reserveUsage->execute([$projected, $gatewayId, $today]);
+        // A gateway not explicitly flagged as a mock/test gateway must
+        // actually be callable for this direction — never silently treat
+        // "missing/invalid credentials" as "simulate success". This is the
+        // fix for the real bug where an incompletely-configured gateway
+        // (e.g. a Razorpay row with no keys) would win the priority race
+        // over a fully-configured Cashfree gateway and the caller would
+        // then silently fall back to the local instant-success path.
+        if (!$gateway['is_mock']) {
+            $liveOk = $direction === 'payout'
+                ? gateway_supports_live_payout($gateway)
+                : gateway_supports_live_order_creation($gateway);
+            if (!$liveOk) {
+                continue;
+            }
+        }
+
+        $insertDaily->execute([$gatewayId, $today]);
+        $lockDaily->execute([$gatewayId, $today]);
+        $projectedDaily = money_add($lockDaily->fetch()['used_amount'] ?? '0.00', $amount);
+        if ($gateway['daily_limit_amount'] !== null && money_cmp($projectedDaily, $gateway['daily_limit_amount']) > 0) {
+            continue;
+        }
+
+        $insertHourly->execute([$gatewayId, $thisHour]);
+        $lockHourly->execute([$gatewayId, $thisHour]);
+        $projectedHourly = money_add($lockHourly->fetch()['used_amount'] ?? '0.00', $amount);
+        if ($gateway['hourly_limit_amount'] !== null && money_cmp($projectedHourly, $gateway['hourly_limit_amount']) > 0) {
+            continue;
+        }
+
+        $insertMonthly->execute([$gatewayId, $thisMonth]);
+        $lockMonthly->execute([$gatewayId, $thisMonth]);
+        $projectedMonthly = money_add($lockMonthly->fetch()['used_amount'] ?? '0.00', $amount);
+        if ($gateway['monthly_limit_amount'] !== null && money_cmp($projectedMonthly, $gateway['monthly_limit_amount']) > 0) {
+            continue;
+        }
+
+        // Every applicable limit fits — commit all three reservations
+        // together now that none of them can fail.
+        $reserveDaily->execute([$projectedDaily, $gatewayId, $today]);
+        $reserveHourly->execute([$projectedHourly, $gatewayId, $thisHour]);
+        $reserveMonthly->execute([$projectedMonthly, $gatewayId, $thisMonth]);
 
         return ['gateway' => $gateway, 'reason' => null];
     }
 
-    return ['gateway' => null, 'reason' => 'all_gateways_at_limit'];
+    return ['gateway' => null, 'reason' => 'no_eligible_gateway'];
 }
 
 /**
- * Releases a same-day reservation previously made by
- * select_and_reserve_gateway(). Safe ONLY when the caller knows for
+ * Releases a reservation previously made by select_and_reserve_gateway()
+ * across all three usage windows. Safe ONLY when the caller knows for
  * certain the reserved capacity was never actually used — e.g. a
  * synchronous, definite rejection from the provider within the same
- * request (see /api/deposits/create.php's Razorpay handling). Never call
+ * request (see includes/payin_service.php's Razorpay handling). Never call
  * this for an ambiguous outcome (timeout) or from a later webhook — a
  * failure reported after the fact is handled by apply_transaction_outcome()
  * instead, which deliberately does NOT free the reservation, since "used"
  * here tracks attempts, not settlements (see includes/gateway_webhooks.php).
+ *
+ * Uses the CURRENT hour/month, which is correct because this is only ever
+ * called synchronously within the same request that made the reservation
+ * (same rule already documented above for the daily window).
  */
 function release_gateway_reservation(PDO $pdo, int $gatewayId, string $amount): void
 {
@@ -109,6 +183,18 @@ function release_gateway_reservation(PDO $pdo, int $gatewayId, string $amount): 
          SET used_amount = GREATEST(used_amount - ?, 0.00), transaction_count = GREATEST(transaction_count - 1, 0)
          WHERE gateway_id = ? AND usage_date = ?'
     )->execute([$amount, $gatewayId, gmdate('Y-m-d')]);
+
+    $pdo->prepare(
+        'UPDATE gateway_hourly_usage
+         SET used_amount = GREATEST(used_amount - ?, 0.00), transaction_count = GREATEST(transaction_count - 1, 0)
+         WHERE gateway_id = ? AND usage_hour = ?'
+    )->execute([$amount, $gatewayId, gmdate('Y-m-d H:00:00')]);
+
+    $pdo->prepare(
+        'UPDATE gateway_monthly_usage
+         SET used_amount = GREATEST(used_amount - ?, 0.00), transaction_count = GREATEST(transaction_count - 1, 0)
+         WHERE gateway_id = ? AND usage_month = ?'
+    )->execute([$amount, $gatewayId, gmdate('Y-m')]);
 }
 
 /**
@@ -160,6 +246,36 @@ function gateway_daily_usage_snapshot(PDO $pdo, int $gatewayId): array
         'SELECT used_amount, transaction_count FROM gateway_daily_usage WHERE gateway_id = ? AND usage_date = ?'
     );
     $stmt->execute([$gatewayId, gmdate('Y-m-d')]);
+    $row = $stmt->fetch();
+
+    return [
+        'used_amount' => $row['used_amount'] ?? '0.00',
+        'transaction_count' => (int) ($row['transaction_count'] ?? 0),
+    ];
+}
+
+/** Same as gateway_daily_usage_snapshot(), for the current hour window. */
+function gateway_hourly_usage_snapshot(PDO $pdo, int $gatewayId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT used_amount, transaction_count FROM gateway_hourly_usage WHERE gateway_id = ? AND usage_hour = ?'
+    );
+    $stmt->execute([$gatewayId, gmdate('Y-m-d H:00:00')]);
+    $row = $stmt->fetch();
+
+    return [
+        'used_amount' => $row['used_amount'] ?? '0.00',
+        'transaction_count' => (int) ($row['transaction_count'] ?? 0),
+    ];
+}
+
+/** Same as gateway_daily_usage_snapshot(), for the current calendar month. */
+function gateway_monthly_usage_snapshot(PDO $pdo, int $gatewayId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT used_amount, transaction_count FROM gateway_monthly_usage WHERE gateway_id = ? AND usage_month = ?'
+    );
+    $stmt->execute([$gatewayId, gmdate('Y-m')]);
     $row = $stmt->fetch();
 
     return [

@@ -15,7 +15,13 @@ $pdo = db();
 // TRUNCATE is DDL and implicitly commits any open transaction in MySQL,
 // so this cleanup runs outside the transaction used for the inserts below.
 $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
-foreach (['audit_logs', 'notifications', 'support_messages', 'support_conversations', 'gateway_daily_usage', 'webhook_events', 'transactions', 'wallets', 'business_profiles', 'customer_whitelisted_ips', 'customer_api_credentials', 'login_attempts', 'payment_gateways', 'users'] as $table) {
+foreach ([
+    'audit_logs', 'api_logs', 'notifications', 'support_messages', 'support_conversations',
+    'gateway_daily_usage', 'gateway_hourly_usage', 'gateway_monthly_usage', 'webhook_events',
+    'payment_sessions', 'transactions', 'wallets', 'business_profiles', 'merchant_profiles',
+    'settlement_banks', 'kyc_documents', 'customer_whitelisted_ips', 'customer_api_credentials',
+    'platform_whitelisted_ips', 'platform_api_settings', 'login_attempts', 'payment_gateways', 'users',
+] as $table) {
     $pdo->exec("TRUNCATE TABLE {$table}");
 }
 $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
@@ -43,49 +49,27 @@ try {
         $userIds[$email] = (int) $pdo->lastInsertId();
     }
 
-    $insertWallet = $pdo->prepare(
-        'INSERT INTO wallets (user_id, available_balance, pending_balance, currency) VALUES (?, ?, ?, ?)'
-    );
-    $insertWallet->execute([$userIds['priya@verapay.test'], '8240.50', '320.00', 'INR']);
-    $insertWallet->execute([$userIds['jonah@verapay.test'], '1150.00', '0.00', 'INR']);
-
-    $insertTxn = $pdo->prepare(
-        'INSERT INTO transactions (user_id, type, method, amount, fee, net_amount, currency, status, reference, destination, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    );
+    // No wallet rows seeded here — a merchant's wallet (settlement ledger)
+    // is created lazily on their first real PayIn/PayOut, same as
+    // production (see includes/payin_service.php's INSERT IGNORE). No
+    // demo deposit/withdrawal transactions either — that browser wallet
+    // flow was removed; PayIn/PayOut activity is created via the API
+    // (see the "Try it" tester on /api-docs) or public/api/v1/*, not seeded.
 
     $priya = $userIds['priya@verapay.test'];
-    $jonah = $userIds['jonah@verapay.test'];
     $now = new DateTime();
-
-    $sampleTxns = [
-        [$priya, 'deposit', 'Bank transfer', '2500.00', '0.00', '2500.00', 'success', '-5'],
-        [$priya, 'deposit', 'Debit card', '750.00', '18.75', '731.25', 'success', '-4'],
-        [$priya, 'withdrawal', 'Bank transfer', '400.00', '4.00', '396.00', 'success', '-3'],
-        [$priya, 'withdrawal', 'Bank transfer', '320.00', '3.20', '316.80', 'pending', '-1'],
-        [$priya, 'deposit', 'Debit card', '150.00', '3.75', '146.25', 'failed', '-1'],
-        [$jonah, 'deposit', 'Bank transfer', '1000.00', '0.00', '1000.00', 'success', '-10'],
-        [$jonah, 'withdrawal', 'Bank transfer', '250.00', '2.50', '247.50', 'success', '-2'],
-        [$jonah, 'deposit', 'Debit card', '200.00', '5.00', '195.00', 'cancelled', '-1'],
-    ];
-
-    foreach ($sampleTxns as $i => [$uid, $type, $method, $amount, $fee, $net, $status, $daysOffset]) {
-        $created = (clone $now)->modify("{$daysOffset} days");
-        $reference = strtoupper($type[0]) . 'X-' . str_pad((string) (10000 + $i), 5, '0', STR_PAD_LEFT);
-        $insertTxn->execute([$uid, $type, $method, $amount, $fee, $net, 'INR', $status, $reference, 'HDFC Bank •• 4821', $created->format('Y-m-d H:i:s')]);
-    }
 
     $insertConversation = $pdo->prepare(
         'INSERT INTO support_conversations (user_id, subject, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
     );
-    $insertConversation->execute([$priya, 'Withdrawal WX-10013 pending longer than expected', 'open', (clone $now)->modify('-2 days')->format('Y-m-d H:i:s'), (clone $now)->modify('-1 hours')->format('Y-m-d H:i:s')]);
+    $insertConversation->execute([$priya, 'PayIn webhook not received for a completed payment', 'open', (clone $now)->modify('-2 days')->format('Y-m-d H:i:s'), (clone $now)->modify('-1 hours')->format('Y-m-d H:i:s')]);
     $conversationId = (int) $pdo->lastInsertId();
 
     $insertMessage = $pdo->prepare(
         'INSERT INTO support_messages (conversation_id, sender_id, sender_role, message, created_at, read_at) VALUES (?, ?, ?, ?, ?, ?)'
     );
-    $insertMessage->execute([$conversationId, $priya, 'customer', 'My withdrawal WX-10013 has been pending for a day. Can you check on it?', (clone $now)->modify('-2 days')->format('Y-m-d H:i:s'), (clone $now)->modify('-2 days +1 hour')->format('Y-m-d H:i:s')]);
-    $insertMessage->execute([$conversationId, $userIds['operator@verapay.test'], 'operator', "Thanks for flagging this, Priya. I'm checking with our processor now and will update you shortly.", (clone $now)->modify('-1 days')->format('Y-m-d H:i:s'), (clone $now)->modify('-1 days +2 hours')->format('Y-m-d H:i:s')]);
+    $insertMessage->execute([$conversationId, $priya, 'customer', 'One of our customers paid successfully but our payin_callback_url never received a webhook for it. Can you check on it?', (clone $now)->modify('-2 days')->format('Y-m-d H:i:s'), (clone $now)->modify('-2 days +1 hour')->format('Y-m-d H:i:s')]);
+    $insertMessage->execute([$conversationId, $userIds['operator@verapay.test'], 'operator', "Thanks for flagging this, Priya. I'm checking the webhook delivery log now and will update you shortly.", (clone $now)->modify('-1 days')->format('Y-m-d H:i:s'), (clone $now)->modify('-1 days +2 hours')->format('Y-m-d H:i:s')]);
 
     $insertGateway = $pdo->prepare(
         'INSERT INTO payment_gateways (display_name, provider, api_key_last4, api_key_hash, status, is_default, priority, daily_limit_amount, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
@@ -119,9 +103,7 @@ try {
     $insertNotification = $pdo->prepare(
         'INSERT INTO notifications (user_id, type, title, message, is_read, created_at) VALUES (?, ?, ?, ?, ?, ?)'
     );
-    $insertNotification->execute([$priya, 'deposit', 'Deposit received', 'Your deposit of ₹2,500.00 was completed successfully.', 1, (clone $now)->modify('-5 days')->format('Y-m-d H:i:s')]);
-    $insertNotification->execute([$priya, 'withdrawal', 'Withdrawal pending', 'Your withdrawal request WX-10013 is being processed.', 0, (clone $now)->modify('-1 days')->format('Y-m-d H:i:s')]);
-    $insertNotification->execute([$priya, 'support', 'Support reply received', 'An operator replied to your conversation about WX-10013.', 0, (clone $now)->modify('-1 days')->format('Y-m-d H:i:s')]);
+    $insertNotification->execute([$priya, 'support', 'Support reply received', 'An operator replied to your conversation about a missing PayIn webhook.', 0, (clone $now)->modify('-1 days')->format('Y-m-d H:i:s')]);
 
     $pdo->commit();
 

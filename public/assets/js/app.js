@@ -196,4 +196,137 @@
         btn.disabled = loading;
         btn.classList.toggle('btn-loading', loading);
     };
+
+    // ---------------- Transaction detail modal ----------------
+    // Shared by every PayIn/PayOut/Transactions table (customer + admin) —
+    // see includes/footer.php for the <dialog> markup and
+    // public/api/transactions/detail.php for the data. Rows are added to
+    // their tables after an async load, so this listens on the document
+    // rather than binding to buttons that don't exist yet at page load.
+    const timelineToneDot = { success: 'bg-success', warning: 'bg-warning', danger: 'bg-danger', neutral: 'bg-text-secondary' };
+    // Sidebar renders the admin/operator nav (including this Customers link)
+    // only for staff — used to hide the "Merchant" section when a customer
+    // is looking at their own transaction, where it's redundant.
+    const isStaffViewer = !!document.querySelector('a[href="/admin/users"]');
+
+    function tdRow(label, value) {
+        if (value === null || value === undefined || value === '') return '';
+        return `<div class="flex items-start justify-between gap-4 py-1.5">
+            <dt class="text-sm text-text-secondary shrink-0">${escapeHtml(label)}</dt>
+            <dd class="text-sm text-text-primary text-right font-medium">${value}</dd>
+        </div>`;
+    }
+
+    function tdSection(title, rowsHtml) {
+        const rows = rowsHtml.filter(Boolean).join('');
+        if (!rows) return '';
+        return `<div>
+            <h3 class="text-sm font-semibold text-text-primary mb-1.5">${escapeHtml(title)}</h3>
+            <dl class="divide-y divide-border">${rows}</dl>
+        </div>`;
+    }
+
+    async function openTransactionDetail(id) {
+        const dialog = document.getElementById('transaction-detail-modal');
+        const body = document.getElementById('td-body');
+        const subtitle = document.getElementById('td-subtitle');
+        if (!dialog || !body) return;
+
+        body.innerHTML = '<p class="text-center py-8 text-text-secondary">Loading…</p>';
+        subtitle.textContent = '';
+        dialog.showModal();
+
+        const { success, data, message } = await apiFetch('/api/transactions/detail.php?id=' + encodeURIComponent(id));
+        if (!success || !data) {
+            body.innerHTML = `<div class="empty-state"><p class="empty-state-title">Couldn't load this transaction.</p><p class="empty-state-body">${escapeHtml(message || 'Please try again.')}</p></div>`;
+            return;
+        }
+
+        const t = data.transaction;
+        const statusMap = { success: 'badge-success', pending: 'badge-warning', failed: 'badge-danger', cancelled: 'badge-neutral', refunded: 'badge-info' };
+        subtitle.textContent = `${t.type === 'payin' ? 'PayIn' : 'PayOut'} · ${t.reference}`;
+
+        const header = `
+            <div class="rounded-md border border-border bg-surface-muted px-4 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div><p class="text-xs text-text-secondary mb-0.5">Reference</p><p class="font-mono text-sm text-text-primary">${escapeHtml(t.reference)}</p></div>
+                <div><p class="text-xs text-text-secondary mb-0.5">Order ID</p><p class="font-mono text-sm text-text-primary">${escapeHtml(t.merchant_order_id || '—')}</p></div>
+                <div><p class="text-xs text-text-secondary mb-0.5">Status</p><span class="${statusMap[t.status] || 'badge-neutral'}">${escapeHtml(t.status)}</span></div>
+                <div><p class="text-xs text-text-secondary mb-0.5">Amount</p><p class="text-sm font-semibold text-text-primary">${formatMoney(t.amount, t.currency)}</p></div>
+            </div>`;
+
+        const paymentInfo = tdSection('Payment information', [
+            tdRow('Type', escapeHtml(t.type === 'payin' ? 'PayIn' : 'PayOut')),
+            tdRow('Fee', formatMoney(t.fee, t.currency)),
+            tdRow('Net amount', formatMoney(t.net_amount, t.currency)),
+            tdRow('Currency', escapeHtml(t.currency)),
+            tdRow('Created', new Date(t.created_at).toLocaleString()),
+            tdRow('Updated', new Date(t.updated_at).toLocaleString()),
+        ]);
+
+        const gatewayInfo = tdSection('Gateway information', [
+            tdRow('Gateway', t.gateway_name ? escapeHtml(t.gateway_name) : 'Not yet assigned'),
+            tdRow('Provider', t.gateway_provider ? escapeHtml(t.gateway_provider) : ''),
+            tdRow('Mode', t.gateway_name ? `<span class="badge-neutral">${t.gateway_sandbox_mode == 1 ? 'Sandbox' : 'Live'}</span>` : ''),
+            tdRow('Gateway transaction ID', t.gateway_txn_id ? `<span class="font-mono">${escapeHtml(t.gateway_txn_id)}</span>` : ''),
+            tdRow('Checkout session', t.session_status ? `${escapeHtml(t.session_status)}${t.session_expires_at ? ' · expires ' + new Date(t.session_expires_at).toLocaleString() : ''}` : ''),
+        ]);
+
+        const merchantInfo = (isStaffViewer && t.user_name) ? tdSection('Merchant', [
+            tdRow('Name', escapeHtml(t.user_name)),
+            tdRow('Email', escapeHtml(t.user_email)),
+        ]) : '';
+
+        const partyInfo = t.type === 'payin'
+            ? tdSection('Customer information', [
+                tdRow('Name', escapeHtml(t.end_customer_name || '—')),
+                tdRow('Email', escapeHtml(t.end_customer_email || '—')),
+                tdRow('Phone', escapeHtml(t.end_customer_phone || '—')),
+            ])
+            : tdSection('Beneficiary information', [
+                tdRow('Name', escapeHtml(t.beneficiary_name || '—')),
+                tdRow('Bank', escapeHtml(t.beneficiary_bank_name || '—')),
+                tdRow('Account (last 4)', t.beneficiary_account_last4 ? `••${escapeHtml(t.beneficiary_account_last4)}` : '—'),
+                tdRow('IFSC', escapeHtml(t.beneficiary_ifsc || '—')),
+                tdRow('Phone', escapeHtml(t.beneficiary_phone || '—')),
+            ]);
+
+        const cb = data.callback || { url: null, status: 'not_configured', attempts: 0, last_attempt_at: null, failure_reason: null };
+        const callbackStatusBadge = {
+            not_configured: '<span class="badge-neutral">Not configured</span>',
+            not_applicable: '<span class="badge-neutral">Awaiting final status</span>',
+            pending: '<span class="badge-warning">Not yet sent</span>',
+            delivered: '<span class="badge-success">Delivered</span>',
+            failed: '<span class="badge-danger">Delivery failed</span>',
+        }[cb.status] || '<span class="badge-neutral">—</span>';
+        const callbackInfo = tdSection('Callback', [
+            tdRow('Callback URL', cb.url ? `<span class="font-mono text-xs break-all">${escapeHtml(cb.url)}</span>` : 'Not configured'),
+            tdRow('Delivery status', callbackStatusBadge),
+            cb.attempts ? tdRow('Attempts', String(cb.attempts)) : '',
+            cb.last_attempt_at ? tdRow('Last attempt', new Date(cb.last_attempt_at).toLocaleString()) : '',
+            cb.failure_reason ? tdRow('Failure reason', escapeHtml(cb.failure_reason)) : '',
+        ]);
+
+        const timelineHtml = data.timeline.length ? `
+            <div>
+                <h3 class="text-sm font-semibold text-text-primary mb-2">Timeline</h3>
+                <ol class="space-y-3">
+                    ${data.timeline.map((ev) => `
+                        <li class="flex gap-3">
+                            <span class="w-2 h-2 rounded-full mt-1.5 shrink-0 ${timelineToneDot[ev.tone] || timelineToneDot.neutral}"></span>
+                            <span class="flex-1">
+                                <span class="block text-sm text-text-primary">${escapeHtml(ev.label)}</span>
+                                <span class="block text-xs text-text-secondary mt-0.5">${new Date(ev.occurred_at).toLocaleString()}</span>
+                            </span>
+                        </li>`).join('')}
+                </ol>
+            </div>` : '';
+
+        body.innerHTML = [header, merchantInfo, paymentInfo, gatewayInfo, partyInfo, callbackInfo, timelineHtml].filter(Boolean).join('<div class="border-t border-border"></div>');
+    }
+    window.Verapay.openTransactionDetail = openTransactionDetail;
+
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-view-transaction]');
+        if (btn) openTransactionDetail(btn.getAttribute('data-view-transaction'));
+    });
 })();

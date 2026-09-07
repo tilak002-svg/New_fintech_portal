@@ -30,76 +30,14 @@ render_hero_banner($user, 'Account security', 'Manage your password and account 
 </div>
 
 <?php if ($user['role'] === 'customer'): ?>
-<div class="card max-w-xl mt-5">
-    <div class="flex items-center gap-2.5 mb-1">
+<div class="card max-w-xl mt-5 !p-5 flex items-center justify-between gap-4">
+    <div class="flex items-center gap-2.5">
         <span class="icon-chip-md icon-chip-brand"><?= icon('key', 'w-4 h-4') ?></span>
-        <h2 class="card-title">API access</h2>
-    </div>
-    <p class="card-subtitle mb-5">Credentials for calling Verapay's API from your own systems — separate from your login above.</p>
-
-    <div id="api-access-loading" class="text-center py-8">
-        <p class="text-md text-text-secondary">Loading…</p>
-    </div>
-
-    <div id="api-access-content" class="hidden space-y-5">
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            <div>
-                <label class="field-label">Client key</label>
-                <input type="text" id="aa-client-key" class="field-input font-mono" readonly>
-            </div>
-            <div>
-                <label class="field-label">Secret key</label>
-                <div class="flex gap-2">
-                    <input type="text" id="aa-secret-key" class="field-input font-mono flex-1" readonly>
-                    <button type="button" id="aa-rotate-secret" class="btn-secondary shrink-0">Rotate</button>
-                </div>
-                <p class="field-help">Only ever shown in full right after rotating.</p>
-            </div>
-        </div>
-
         <div>
-            <label class="field-label">Bearer token</label>
-            <div class="flex flex-col sm:flex-row gap-3">
-                <input type="text" id="aa-bearer-token" class="field-input font-mono flex-1" readonly placeholder="No token generated yet">
-                <button type="button" id="aa-generate-token" class="btn-secondary shrink-0"><?= icon('key', 'w-4 h-4') ?> Generate token</button>
-            </div>
-            <p id="aa-token-meta" class="field-help"></p>
-            <p class="field-help">
-                For a system that isn't logged in, exchange <code class="font-mono text-xs">client_key</code>/<code class="font-mono text-xs">secret_key</code> for a token instead:
-                <code class="font-mono text-xs block mt-1">POST /api/auth/api-token.php {"client_key": "...", "secret_key": "..."}</code>
-            </p>
-        </div>
-
-        <div>
-            <label class="field-label">Whitelisted IPs</label>
-            <p class="field-help mb-2">Only requests from these addresses can use your token — <strong class="text-text-primary">managed by Verapay support</strong>, not self-service, so a compromised login alone can't open access from a new location. Contact support to add or change one.</p>
-            <ul id="aa-whitelisted-ips" class="space-y-1.5"></ul>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            <div>
-                <label for="aa-payin-url" class="field-label">Pay-in callback URL</label>
-                <input type="url" id="aa-payin-url" class="field-input" placeholder="https://…">
-            </div>
-            <div>
-                <label for="aa-payout-url" class="field-label">Payout callback URL</label>
-                <input type="url" id="aa-payout-url" class="field-input" placeholder="https://…">
-            </div>
-        </div>
-        <p id="aa-webhook-error" class="field-error hidden"></p>
-        <button type="button" id="aa-save-webhooks" class="btn-primary"><?= icon('upload', 'w-4 h-4') ?> Save webhook URLs</button>
-
-        <div class="pt-4 border-t border-border">
-            <label class="field-label">Webhook signing secret</label>
-            <div class="flex gap-2">
-                <input type="text" id="aa-webhook-secret" class="field-input font-mono flex-1" readonly>
-                <button type="button" id="aa-rotate-webhook-secret" class="btn-secondary shrink-0">Rotate</button>
-            </div>
-            <p class="field-help">
-                Only ever shown in full right after rotating. Verify each delivery to your callback URLs above by recomputing <code class="font-mono text-xs">hex(HMAC_SHA256(raw_request_body, this_secret))</code> and comparing it to the <code class="font-mono text-xs">X-Verapay-Signature</code> header — reject anything that doesn't match.
-            </p>
+            <p class="text-md font-medium text-text-primary">API access</p>
+            <p class="text-sm text-text-secondary">Base URL, credentials, and callback URLs moved here.</p>
         </div>
     </div>
+    <a href="/api-access" class="btn-secondary shrink-0">Open</a>
 </div>
 <?php endif; ?>

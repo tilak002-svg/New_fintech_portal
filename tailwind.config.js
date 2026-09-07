@@ -70,7 +70,7 @@ module.exports = {
       },
       boxShadow: {
         card: "rgba(149, 157, 165, 0.2) 0px 8px 24px 0px",
-        soft: "rgba(78, 20, 140, 0.05) 0px 4px 12px 0px"
+        soft: "rgba(30, 64, 175, 0.05) 0px 4px 12px 0px"
       },
       transitionDuration: {
         instant: "200ms",

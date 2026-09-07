@@ -1,0 +1,150 @@
+{
+  "info": {
+    "name": "Verapay API",
+    "description": "PayIn/PayOut merchant API. Run \"Get bearer token\" first — it saves {{bearer_token}} into this collection automatically. Every other request reuses it. See /api-docs in your Verapay dashboard for the full reference this collection mirrors.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://your-domain.example.com", "description": "Your Verapay platform's root URL — no trailing slash." },
+    { "key": "client_key", "value": "", "description": "From Settings → API access in your Verapay dashboard." },
+    { "key": "client_secret", "value": "", "description": "Shown once, right after you rotate it, in Settings → API access." },
+    { "key": "bearer_token", "value": "", "description": "Auto-filled by \"Get bearer token\" below — leave blank." }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Get bearer token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    if (body.success && body.data && body.data.bearer_token) {",
+                  "        pm.collectionVariables.set('bearer_token', body.data.bearer_token);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client_key\": \"{{client_key}}\",\n  \"secret_key\": \"{{client_secret}}\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/auth/api-token", "host": ["{{base_url}}"], "path": ["api", "auth", "api-token"] },
+            "description": "Exchanges client_key/client_secret for a bearer token. Your server's IP must already be on your Verapay-admin-managed whitelist (Settings → API access shows the current list) or this returns 403."
+          }
+        }
+      ]
+    },
+    {
+      "name": "PayIn",
+      "item": [
+        {
+          "name": "Create PayIn",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{bearer_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"500.00\",\n  \"currency\": \"INR\",\n  \"merchant_order_id\": \"your-own-unique-order-id\",\n  \"end_customer_name\": \"Priya Sharma\",\n  \"end_customer_email\": \"priya@example.com\",\n  \"end_customer_phone\": \"9876543210\",\n  \"return_url\": \"https://yoursite.com/order/1001/thank-you\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/v1/payins/create", "host": ["{{base_url}}"], "path": ["api", "v1", "payins", "create"] },
+            "description": "merchant_order_id doubles as your idempotency key — retrying with the same value replays the original result instead of creating a duplicate. Returns a payment_url; redirect your end-customer there to pay."
+          }
+        },
+        {
+          "name": "Get PayIn status",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/payins/status?reference={{payin_reference}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "payins", "status"],
+              "query": [{ "key": "reference", "value": "{{payin_reference}}" }]
+            },
+            "description": "Set the payin_reference variable (or edit this query param) to the reference returned by Create PayIn."
+          }
+        }
+      ]
+    },
+    {
+      "name": "PayOut",
+      "item": [
+        {
+          "name": "Create PayOut",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{bearer_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"1000.00\",\n  \"currency\": \"INR\",\n  \"merchant_order_id\": \"your-own-unique-order-id\",\n  \"beneficiary_name\": \"Rahul Verma\",\n  \"beneficiary_account_number\": \"1234567890123\",\n  \"beneficiary_ifsc\": \"HDFC0001234\",\n  \"beneficiary_bank_name\": \"HDFC Bank\",\n  \"beneficiary_phone\": \"9876543211\",\n  \"beneficiary_address\": \"12 MG Road, Bengaluru\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/v1/payouts/create", "host": ["{{base_url}}"], "path": ["api", "v1", "payouts", "create"] },
+            "description": "Debits your available settlement balance. All beneficiary_* fields are required. merchant_order_id is your idempotency key, same as PayIn."
+          }
+        },
+        {
+          "name": "Get PayOut status",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/payouts/status?reference={{payout_reference}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "payouts", "status"],
+              "query": [{ "key": "reference", "value": "{{payout_reference}}" }]
+            },
+            "description": "Set the payout_reference variable (or edit this query param) to the reference returned by Create PayOut."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Account",
+      "item": [
+        {
+          "name": "List transactions",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/transactions/list?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "transactions", "list"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "20" },
+                { "key": "type", "value": "", "description": "payin | payout, blank = both", "disabled": true },
+                { "key": "status", "value": "", "description": "pending | success | failed | cancelled | refunded", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get balance",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{bearer_token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/balance", "host": ["{{base_url}}"], "path": ["api", "v1", "balance"] }
+          }
+        }
+      ]
+    }
+  ]
+}

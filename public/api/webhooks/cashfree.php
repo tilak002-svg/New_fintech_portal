@@ -15,6 +15,7 @@ require_once __DIR__ . '/../../../includes/functions.php';
 require_once __DIR__ . '/../../../includes/gateway_secrets.php';
 require_once __DIR__ . '/../../../includes/gateway_webhooks.php';
 require_once __DIR__ . '/../../../includes/gateway_providers/cashfree.php';
+require_once __DIR__ . '/../../../includes/chargeback_service.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     json_response(false, null, 'Method not allowed.', 405);
@@ -57,6 +58,12 @@ if (!cashfree_verify_webhook_signature($rawBody, $timestampHeader, $signatureHea
 $rawPayload = json_decode($rawBody, true);
 if (!is_array($rawPayload)) {
     json_response(false, null, 'Malformed JSON body.', 400);
+}
+
+$chargebackEvent = cashfree_parse_chargeback_webhook_payload($rawPayload);
+if ($chargebackEvent !== null) {
+    $result = process_chargeback_event($pdo, $gatewayId, 'cashfree', $chargebackEvent);
+    json_response($result['status'] < 400, null, $result['message'], $result['status']);
 }
 
 $mapped = cashfree_parse_webhook_payload($rawPayload);

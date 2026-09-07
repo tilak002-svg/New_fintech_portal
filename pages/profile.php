@@ -80,7 +80,7 @@ render_hero_banner($user, 'Your profile', 'Manage your personal information and 
                 </div>
                 <div>
                     <label for="b-pan" class="field-label">PAN number</label>
-                    <input type="text" id="b-pan" class="field-input font-mono" maxlength="10" placeholder="AAAAA0000A" style="text-transform:uppercase">
+                    <input type="text" id="b-pan" class="field-input font-mono uppercase" maxlength="10" placeholder="AAAAA0000A">
                     <p class="field-help">10 characters, e.g. AAAAA0000A.</p>
                 </div>
                 <div>
@@ -93,7 +93,7 @@ render_hero_banner($user, 'Your profile', 'Manage your personal information and 
                 </div>
                 <div class="sm:col-span-2">
                     <label for="b-gstin" class="field-label">GSTIN</label>
-                    <input type="text" id="b-gstin" class="field-input font-mono" maxlength="15" placeholder="15-character GSTIN" style="text-transform:uppercase">
+                    <input type="text" id="b-gstin" class="field-input font-mono uppercase" maxlength="15" placeholder="15-character GSTIN">
                 </div>
                 <div class="sm:col-span-2">
                     <label for="b-address" class="field-label">Office address</label>
@@ -130,7 +130,7 @@ render_hero_banner($user, 'Your profile', 'Manage your personal information and 
             </div>
             <div class="mb-6">
                 <label for="bank-ifsc" class="field-label">IFSC code</label>
-                <input type="text" id="bank-ifsc" class="field-input font-mono" maxlength="11" placeholder="e.g. HDFC0001234" style="text-transform:uppercase">
+                <input type="text" id="bank-ifsc" class="field-input font-mono uppercase" maxlength="11" placeholder="e.g. HDFC0001234">
             </div>
             <p id="bank-error" class="field-error hidden mb-4"></p>
             <button type="submit" id="bank-submit" class="btn-primary">Save settlement bank</button>

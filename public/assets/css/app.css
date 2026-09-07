@@ -7,6 +7,12 @@
     font-family: var(--font-sans);
     font-size: 16px;
     line-height: 25.6px;
+    /* Medium (500), not Regular (400) — a real loaded weight, not synthetic
+       bold. Regular Montserrat at this design system's compact sizes reads
+       thin/washed out; headings and buttons that already set font-semibold
+       (600) or font-bold (700) are more specific and stay exactly as they
+       were. */
+    font-weight: 500;
   }
 
   body {
@@ -74,8 +80,11 @@
   }
 
   /* ---------- Cards ---------- */
+  /* border-border-strong, not border-border: a card's outline is a functional
+     containment edge (like an input's), not a decorative divider — see the
+     distinction tokens.css itself draws between the two border tokens. */
   .card {
-    @apply bg-surface-raised border border-border rounded-md p-6 shadow-soft;
+    @apply bg-surface-raised border border-border-strong rounded-md p-6 shadow-soft;
   }
   .card-title {
     @apply text-lg font-semibold text-text-primary;
@@ -147,6 +156,11 @@
   .table-base tbody tr:hover {
     @apply bg-surface-muted;
   }
+  /* Financial amount cells — right-aligned with tabular figures so digits
+     line up down the column, per the app-wide table convention. */
+  .table-amount {
+    @apply text-right tabular-nums;
+  }
 
   /* ---------- Skeleton ---------- */
   .skeleton {
@@ -188,7 +202,7 @@
 
   /* ---------- Docs: collapsible endpoint ---------- */
   .doc-endpoint {
-    @apply bg-surface-raised border border-border rounded-md shadow-soft overflow-hidden transition-shadow duration-instant;
+    @apply bg-surface-raised border border-border-strong rounded-md shadow-soft overflow-hidden transition-shadow duration-instant;
   }
   .doc-endpoint[open] {
     @apply shadow-card;
@@ -312,6 +326,55 @@
   }
   .progress-fill {
     @apply h-full rounded-full bg-brand transition-all duration-fast ease-in-out;
+  }
+
+  /* ---------- Login card: one-time entrance rise ---------- */
+  .login-card-enter {
+    animation: login-card-enter 500ms ease-out both;
+  }
+  @keyframes login-card-enter {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ---------- Login brand panel: floating dots + scene carousel ---------- */
+  .login-float {
+    animation: login-float ease-in-out infinite;
+  }
+  @keyframes login-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-14px); }
+  }
+  .login-scene {
+    @apply absolute inset-0 opacity-0 pointer-events-none transition-opacity duration-500 ease-in-out;
+  }
+  .login-scene.is-active {
+    @apply opacity-100 pointer-events-auto;
+  }
+  .login-tag {
+    @apply text-white/40 transition-colors duration-fast;
+  }
+  .login-tag.is-active {
+    @apply text-white;
+  }
+  .login-progress-track {
+    @apply relative flex-1 h-1 rounded-full bg-white/20 overflow-hidden cursor-pointer;
+  }
+  .login-progress-track:focus-visible {
+    @apply outline outline-2 outline-white outline-offset-2;
+  }
+  .login-progress-fill {
+    @apply absolute inset-y-0 left-0 block w-0 rounded-full bg-white;
+  }
+  @keyframes login-progress-fill {
+    from { width: 0%; }
+    to { width: 100%; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .login-card-enter { animation: none; }
+    .login-float { animation: none; }
+    .login-scene { transition: none; }
+    .login-progress-fill { animation: none !important; }
   }
 
   /* ---------- Sticky date-group heading (notifications list) ---------- */

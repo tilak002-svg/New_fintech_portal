@@ -127,10 +127,10 @@ Credentials are never hard-coded anywhere in the codebase — only read from `.e
 ## 6. Run locally (without Docker)
 
 ```bash
-php -S localhost:8000 -t public
+php -S localhost:8000 -t public public/router.php
 ```
 
-PHP's built-in server automatically falls back to `public/index.php` for any URL that isn't a real file, so pretty URLs (`/dashboard`, `/wallet`, …) work without extra setup. `public/api/*.php` files are served directly since they exist as real files.
+The router script is required — without it, PHP's built-in server 404s directly (never reaching `public/index.php`) for any URL whose directory prefix happens to exist on disk, e.g. `/api/v1/balance` (no `.php`), because `public/api/v1/` is a real directory even though `balance` isn't a real file in it. `public/router.php` serves real files (`public/api/*.php`, assets, …) as-is and forwards everything else to `public/index.php` — the same behavior Apache (`.htaccess`) and Nginx already give you natively, so this file is dev-server-only.
 
 ## 7. Deploy (conventional PHP hosting)
 
@@ -151,6 +151,12 @@ PHP's built-in server automatically falls back to `public/index.php` for any URL
 4. Run `npm run build:css` before deploying (or commit `app.build.css`) — the app never fetches Tailwind at runtime.
 5. Serve over HTTPS — session cookies are marked `Secure` automatically once the request arrives over HTTPS (see `includes/auth.php`).
 6. If your host can't point the document root at `/public`, the root `.htaccess` blocks direct access to `config/`, `includes/`, `pages/`, and `database/` as a defense-in-depth fallback — but a correctly set document root is the supported path.
+7. **Schedule the two background workers — REQUIRES EXTERNAL CONFIGURATION.** This app has no queue/daemon of its own; `bin/reconcile-pending.php` and `bin/process-webhook-retries.php` are plain CLI scripts that do nothing until something invokes them on a schedule. Nothing in code makes this happen automatically. Add to crontab (Linux) or Task Scheduler (Windows):
+   ```cron
+   */2 * * * *  php /path/to/app/bin/process-webhook-retries.php >> /var/log/verapay-webhooks.log 2>&1
+   */5 * * * *  php /path/to/app/bin/reconcile-pending.php     >> /var/log/verapay-reconcile.log 2>&1
+   ```
+   Until this is configured, retries and reconciliation only happen when an admin clicks "Retry due deliveries now" / "Reconcile pending transactions" on **Admin → Webhooks** — real, working, but manual.
 
 ## 8. Demo accounts
 
@@ -193,12 +199,15 @@ All monetary values are `DECIMAL`, never float. Fee/balance math runs through `i
 
 ## 11. API reference
 
-All endpoints return `{ "success": bool, "data": ..., "message": "..." }`. Mutating endpoints require the `X-CSRF-Token` header. All require an authenticated session unless noted.
+All endpoints return `{ "success": bool, "data": ..., "message": "...", "error_code": string|null, "request_id": "req_..." }` — `error_code` is a stable machine-readable string (`INVALID_CREDENTIALS`, `IP_NOT_WHITELISTED`, `RATE_LIMITED`, `VALIDATION_ERROR`, ...) for the highest-traffic/security-relevant endpoints; other endpoints still return `error_code: null` on failure (only `message` is guaranteed everywhere). `request_id` is also echoed as an `X-Request-ID` response header, for tracing one failure across `api_logs`/`audit_logs`/server logs. Mutating endpoints require the `X-CSRF-Token` header. All require an authenticated session unless noted.
 
 | Endpoint | Method | Notes |
 |---|---|---|
 | `/api/auth/login.php` | POST | Public. Rate-limited. |
 | `/api/auth/logout.php` | POST | |
+| `/api/auth/csrf-token.php` | GET | Public. Mints/returns the current session's CSRF token — used by the auth pages to silently recover from a stale embedded token instead of failing until a manual refresh. |
+| `/api/admin/reconciliation/run.php` | POST | Admin only. Manually runs the same reconciliation pass as `bin/reconcile-pending.php` (§7). |
+| `/api/admin/webhooks/retry-now.php` | POST | Admin only. Manually runs the same retry pass as `bin/process-webhook-retries.php` (§7). |
 | `/api/dashboard/summary.php` | GET | Scoped to caller; admins/operators get platform-wide figures |
 | `/api/wallet/summary.php` | GET | Customer only |
 | `/api/deposits/create.php` | POST | Customer only (session or bearer token). Server recalculates fee/net amount — never trusts client math. Places a real order at the gateway's provider (Razorpay/Cashfree) when one is configured |
@@ -233,7 +242,9 @@ All endpoints return `{ "success": bool, "data": ..., "message": "..." }`. Mutat
 | `/api/settings/generate-api-token.php` | POST | Customer only |
 | `/api/settings/save-api-webhooks.php` | POST | Customer only. Sets `payin_callback_url`/`payout_callback_url` |
 
-Full customer-integration walkthrough (auth exchange, pay-in/payout, outbound webhook payload + signature verification): in-app at **Admin → Payment gateways → Customer API docs** (`/admin/api-integration-docs`).
+| `/api/transactions/detail.php` | GET | Full transaction detail + event timeline for one PayIn/PayOut (`?id=`). Customer-scoped to their own; admin/operator can view any. Powers the "eye" view action on Transactions/PayIns/PayOuts. |
+
+Full customer-integration walkthrough (auth exchange, pay-in/payout, outbound webhook payload + signature verification, error codes, downloadable Postman collection): in-app at **API documentation** (`/api-docs`, customer role). `/admin/gateways/docs` is a separate, admin-only page about configuring upstream providers (Razorpay/Cashfree) — not the customer integration reference.
 
 ## 12. What's been tested
 
