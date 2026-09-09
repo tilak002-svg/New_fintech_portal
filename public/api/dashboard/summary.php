@@ -102,18 +102,25 @@ $data['total_payins'] = total_api_amount($pdo, $scopeSql, $params, 'deposit');
 $data['total_payouts'] = total_api_amount($pdo, $scopeSql, $params, 'withdrawal');
 
 if ($isOperator) {
-    // Gateway health strip — admin dashboard only. Success rate is
-    // definite-outcome-only (success / (success+failed)), excluding
+    // Gateway-wise transaction status — admin dashboard only. Success rate
+    // is definite-outcome-only (success / (success+failed)), excluding
     // pending/cancelled/refunded from the denominator so an in-flight
     // transaction never drags the rate down before it's actually resolved.
+    // The join is intentionally unfiltered by status (unlike the old
+    // success/failed-only version) so pending/cancelled/refunded counts and
+    // the total are captured in the same pass.
     $gatewaysStmt = $pdo->query(
         "SELECT g.id, g.display_name, g.provider, g.status, g.sandbox_mode, g.priority,
                 g.daily_limit_amount, g.auto_paused_until,
                 (SELECT used_amount FROM gateway_daily_usage WHERE gateway_id = g.id AND usage_date = CURDATE()) AS used_today,
                 COALESCE(SUM(t.status = 'success'), 0) AS success_count,
-                COALESCE(SUM(t.status = 'failed'), 0) AS failed_count
+                COALESCE(SUM(t.status = 'pending'), 0) AS pending_count,
+                COALESCE(SUM(t.status = 'failed'), 0) AS failed_count,
+                COALESCE(SUM(t.status IN ('cancelled', 'refunded')), 0) AS other_count,
+                COUNT(t.id) AS total_count,
+                COALESCE(SUM(CASE WHEN t.status = 'success' THEN t.net_amount ELSE 0 END), 0) AS success_amount
          FROM payment_gateways g
-         LEFT JOIN transactions t ON t.gateway_id = g.id AND t.status IN ('success', 'failed')
+         LEFT JOIN transactions t ON t.gateway_id = g.id
          GROUP BY g.id
          ORDER BY g.priority ASC, g.id ASC"
     );
@@ -131,6 +138,12 @@ if ($isOperator) {
             'used_today' => $g['used_today'] ?? '0.00',
             'daily_limit_amount' => $g['daily_limit_amount'],
             'success_rate' => $resolved > 0 ? round(($g['success_count'] / $resolved) * 100, 1) : null,
+            'success_count' => (int) $g['success_count'],
+            'pending_count' => (int) $g['pending_count'],
+            'failed_count' => (int) $g['failed_count'],
+            'other_count' => (int) $g['other_count'],
+            'total_count' => (int) $g['total_count'],
+            'success_amount' => (string) $g['success_amount'],
         ];
     }
     $data['gateway_health'] = $gateways;

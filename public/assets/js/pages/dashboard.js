@@ -63,44 +63,158 @@
             </tr>`).join('');
     }
 
-    function renderGatewayHealth(gateways) {
-        const tbody = document.getElementById('gateway-health-tbody');
-        if (!tbody) return;
-        if (!gateways.length) {
-            tbody.innerHTML = `<tr><td colspan="4">
-                <div class="empty-state">
-                    <span class="empty-state-icon"><svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="7" height="7" rx="1.5"/><rect x="14" y="9" width="7" height="7" rx="1.5"/></svg></span>
-                    <p class="empty-state-title">No gateways configured</p>
-                    <p class="empty-state-body">Add a payment gateway to begin processing payments.</p>
-                    <a href="/admin/gateways" class="btn-primary">Add gateway</a>
-                </div>
-            </td></tr>`;
+    // Raw SVG matching icons.php's 'gateway' path, for the JS-rendered
+    // empty state so it's pixel-identical to the server-rendered one this
+    // replaces on re-render (page.php's own <?= icon('gateway', ...) ?>).
+    const GATEWAY_EMPTY_ICON_SVG = '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9" width="7" height="7" rx="1.5"/><rect x="14" y="9" width="7" height="7" rx="1.5"/><path d="M10 12.5h4"/><path d="M6.5 9V6a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 17.5 6v3"/></svg>';
+
+    // Identity color, not status color — this is "which gateway", not
+    // "what happened", so it deliberately does NOT reuse the
+    // success/warning/danger/neutral status palette those colors mean
+    // elsewhere on this page (a gateway slice colored "danger" would
+    // misread as broken). Fixed order, never cycled/reassigned per filter.
+    const GATEWAY_SHARE_COLORS = ['var(--color-brand)', 'var(--color-info)', 'var(--color-success)', 'var(--color-warning)', 'var(--color-neutral)', 'var(--color-danger)'];
+
+    /**
+     * All-gateways settled-amount share, as a donut — the "everything at
+     * once" companion to the trend chart's "one gateway in detail" view.
+     * Synchronous (gateway_health is already loaded, no fetch of its own),
+     * so it never needs its own loading state beyond the initial skeleton.
+     */
+    function renderGatewayShare(gateways) {
+        const el = document.getElementById('gateway-analytics-share');
+        if (!el) return;
+
+        const withAmount = gateways
+            .map((g) => ({ id: g.id, display_name: g.display_name, amount: parseFloat(g.success_amount || '0') }))
+            .filter((g) => g.amount > 0);
+        const total = withAmount.reduce((sum, g) => sum + g.amount, 0);
+
+        if (!withAmount.length || total <= 0) {
+            el.innerHTML = `<div class="empty-state !py-6 h-full justify-center">
+                <span class="empty-state-icon">${GATEWAY_EMPTY_ICON_SVG}</span>
+                <p class="empty-state-title">No settled volume yet</p>
+                <p class="empty-state-body">Each gateway's share of settled amount will appear here once payments start settling.</p>
+            </div>`;
             return;
         }
-        tbody.innerHTML = gateways.map((g) => {
-            let statusBadge;
-            if (g.auto_paused) statusBadge = '<span class="badge-warning">Auto-paused</span>';
-            else if (g.status === 'active') statusBadge = '<span class="badge-success">Active</span>';
-            else statusBadge = '<span class="badge-neutral">Inactive</span>';
 
-            const usage = g.daily_limit_amount
-                ? `${money(g.used_today)} / ${money(g.daily_limit_amount)}`
-                : `${money(g.used_today)} <span class="text-text-secondary">(no daily limit)</span>`;
+        const size = 180;
+        const radius = 70;
+        const strokeWidth = 24;
+        const circumference = 2 * Math.PI * radius;
+        const center = size / 2;
 
-            const rate = g.success_rate === null
-                ? '<span class="text-text-secondary">—</span>'
-                : `<span class="${g.success_rate >= 95 ? 'text-success' : g.success_rate >= 80 ? 'text-warning' : 'text-danger'} font-medium">${g.success_rate}%</span>`;
-
-            return `<tr>
-                <td>
-                    <span class="block text-md text-text-primary">${escapeHtml(g.display_name)}</span>
-                    <span class="block text-sm text-text-secondary">${escapeHtml(g.provider)} · ${g.sandbox_mode ? 'Sandbox' : 'Live'} · priority ${g.priority ?? '—'}</span>
-                </td>
-                <td>${statusBadge}</td>
-                <td class="text-sm">${usage}</td>
-                <td class="text-sm">${rate}</td>
-            </tr>`;
+        let offset = 0;
+        const segments = withAmount.map((g, i) => {
+            const pct = g.amount / total;
+            const dash = pct * circumference;
+            // 2px surface gap between segments, same rule as the meter bars
+            // elsewhere on this page — separation by gap, not a border.
+            const gapped = Math.max(dash - 2, 0);
+            const color = GATEWAY_SHARE_COLORS[i % GATEWAY_SHARE_COLORS.length];
+            const markup = `<circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="${color}" stroke-width="${strokeWidth}"
+                stroke-dasharray="${gapped.toFixed(2)} ${(circumference - gapped).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"
+                transform="rotate(-90 ${center} ${center})"><title>${escapeHtml(g.display_name)}: ${money(g.amount.toFixed(2))} (${(pct * 100).toFixed(1)}%)</title></circle>`;
+            offset += dash;
+            return markup;
         }).join('');
+
+        const legend = withAmount.map((g, i) => `
+            <span class="flex items-center gap-2 text-sm">
+                <span class="w-2 h-2 rounded-full shrink-0" style="background-color:${GATEWAY_SHARE_COLORS[i % GATEWAY_SHARE_COLORS.length]}"></span>
+                <span class="text-text-secondary truncate min-w-0">${escapeHtml(g.display_name)}</span>
+                <span class="text-text-primary font-medium ml-auto shrink-0">${((g.amount / total) * 100).toFixed(0)}%</span>
+            </span>`).join('');
+
+        el.innerHTML = `
+            <p class="text-sm font-medium text-text-secondary mb-3">Settled amount share by gateway</p>
+            <div class="flex items-center gap-6">
+                <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" class="shrink-0" role="img" aria-label="Settled amount share by gateway, ${withAmount.length} gateways, ${money(total.toFixed(2))} total">
+                    ${segments}
+                    <text x="${center}" y="${center - 4}" text-anchor="middle" font-size="11" fill="var(--color-text-secondary)">Total</text>
+                    <text x="${center}" y="${center + 14}" text-anchor="middle" font-size="13" font-weight="600" fill="var(--color-text-primary)">${money(total.toFixed(2))}</text>
+                </svg>
+                <div class="flex-1 min-w-0 space-y-2">${legend}</div>
+            </div>`;
+    }
+
+    /**
+     * Per-gateway drill-down — same trend-chart treatment as Deposit/
+     * Withdrawal analytics below it (renderTrendChart), scoped by whichever
+     * gateway the dropdown has selected. The summary stats reuse the
+     * gateway_health entry load() already fetched — only the 7-day trend
+     * needs its own request, re-fired on every selection change.
+     */
+    function initGatewayAnalytics(gateways) {
+        const select = document.getElementById('gateway-analytics-select');
+        const summaryEl = document.getElementById('gateway-analytics-summary');
+        const chartEl = document.getElementById('gateway-analytics-chart');
+        if (!select || !chartEl) return;
+
+        const byId = Object.fromEntries(gateways.map((g) => [String(g.id), g]));
+        const previousValue = select.value;
+        select.innerHTML = '<option value="">Select a gateway…</option>'
+            + gateways.map((g) => `<option value="${g.id}">${escapeHtml(g.display_name)}</option>`).join('');
+        if (previousValue && byId[previousValue]) {
+            select.value = previousValue;
+        } else if (gateways.length) {
+            // Default to the highest-priority ACTIVE gateway — gateway_health
+            // is ordered priority ASC (see summary.php) but priority alone
+            // ignores status, and select_and_reserve_gateway() (the real
+            // routing engine) only ever considers active gateways. Picking
+            // an inactive one here would default to a gateway that could
+            // never actually handle a PayIn. Falls back to the first
+            // gateway overall only if none are active.
+            const defaultGateway = gateways.find((g) => g.status === 'active') || gateways[0];
+            select.value = String(defaultGateway.id);
+        }
+
+        renderGatewayShare(gateways);
+
+        function showEmptyState() {
+            summaryEl.style.visibility = 'hidden';
+            chartEl.innerHTML = `<div class="empty-state">
+                <span class="empty-state-icon">${GATEWAY_EMPTY_ICON_SVG}</span>
+                <p class="empty-state-title">Select a gateway</p>
+                <p class="empty-state-body">Pick a gateway above to see its individual transaction summary.</p>
+            </div>`;
+        }
+
+        async function loadFor(gatewayId) {
+            const g = byId[gatewayId];
+            if (!g) { showEmptyState(); return; }
+
+            const rateColor = g.success_rate === null ? 'text-text-secondary'
+                : g.success_rate >= 95 ? 'text-success' : g.success_rate >= 80 ? 'text-warning' : 'text-danger';
+            summaryEl.style.visibility = 'visible';
+            summaryEl.innerHTML = `
+                <div>
+                    <p class="text-sm text-text-secondary">Total transactions</p>
+                    <p class="text-lg font-semibold text-text-primary">${g.total_count}</p>
+                </div>
+                <div class="pl-6 border-l border-border">
+                    <p class="text-sm text-text-secondary">Success rate</p>
+                    <p class="text-lg font-semibold ${rateColor}">${g.success_rate === null ? '—' : g.success_rate + '%'}</p>
+                </div>
+                <div class="pl-6 border-l border-border">
+                    <p class="text-sm text-text-secondary">Settled amount</p>
+                    <p class="text-lg font-semibold text-text-primary">${money(g.success_amount || '0.00')}</p>
+                </div>`;
+
+            chartEl.innerHTML = '<div class="skeleton h-[265px] w-full rounded-sm"></div>';
+            const { success, data: trendData } = await apiFetch(`/api/dashboard/gateway-trend.php?gateway_id=${encodeURIComponent(gatewayId)}`);
+            // The dropdown may have changed again while this request was in
+            // flight — never paint a stale trend over a newer selection.
+            if (!success || select.value !== gatewayId) return;
+            renderTrendChart(chartEl, trendData.trend, 'var(--color-brand)', (v) => money(v.toFixed(2)), 'gateway-analytics-chart-title');
+        }
+
+        select.addEventListener('change', () => {
+            if (select.value) loadFor(select.value); else showEmptyState();
+        });
+
+        if (select.value) loadFor(select.value);
     }
 
     function renderOnboarding(onboarding) {
@@ -176,7 +290,7 @@
                 'withdrawals-chart-title'
             );
 
-            renderGatewayHealth(data.gateway_health || []);
+            initGatewayAnalytics(data.gateway_health || []);
         } else {
             renderOnboarding(data.onboarding);
             const wallet = data.wallet || { available_balance: '0.00', pending_balance: '0.00', currency: 'INR' };

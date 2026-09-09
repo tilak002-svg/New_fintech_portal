@@ -32,6 +32,26 @@ render_hero_banner($user, 'PayOuts', 'Merchant-API-driven payouts sent across th
                 <option value="amount_asc">Amount: low to high</option>
             </select>
         </div>
+        <div>
+            <label for="f-provider" class="field-label">Provider</label>
+            <select id="f-provider" name="provider" class="field-input">
+                <option value="">All providers</option>
+                <option value="cashfree">Cashfree</option>
+                <option value="razorpay">Razorpay</option>
+                <option value="payu">PayU</option>
+                <option value="stripe">Stripe</option>
+                <option value="paypal">PayPal</option>
+                <option value="other">Other</option>
+            </select>
+        </div>
+        <div>
+            <label for="f-from" class="field-label">From</label>
+            <input type="date" id="f-from" name="from" class="field-input">
+        </div>
+        <div>
+            <label for="f-to" class="field-label">To</label>
+            <input type="date" id="f-to" name="to" class="field-input">
+        </div>
     </form>
 </div>
 

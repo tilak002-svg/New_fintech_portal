@@ -7,7 +7,7 @@
     const tbody = document.getElementById('treasury-tbody');
     const pagination = document.getElementById('treasury-pagination');
     const downloadLink = document.getElementById('treasury-download');
-    const colCount = 8;
+    const colCount = 9;
 
     let searchDebounce;
 
@@ -89,6 +89,7 @@
                     </span>
                 </td>
                 <td class="font-mono text-sm">${escapeHtml(row.reference)}</td>
+                <td>${row.gateway_name ? escapeHtml(row.gateway_name) : '<span class="text-text-secondary">—</span>'}</td>
                 <td class="table-amount text-success">${row.type === 'deposit' ? money(row.amount) : '—'}</td>
                 <td class="table-amount text-danger">${row.type === 'withdrawal' ? money(row.amount) : '—'}</td>
                 <td class="table-amount font-medium">${money(row.running_balance)}</td>

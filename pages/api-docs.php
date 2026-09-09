@@ -295,7 +295,7 @@ $errorCodes = [
 <div class="card mb-5">
     <p class="text-sm font-semibold text-text-primary mb-1.5">Base URL</p>
     <?= code_block_cd($baseUrl) ?>
-    <p class="text-sm text-text-secondary mt-3">Every path below is relative to this — e.g. <code class="font-mono text-sm">POST <?= e($baseUrl) ?>/payins/create</code>.</p>
+    <p class="text-sm text-text-secondary mt-3">Every path below is relative to this — e.g. <code class="font-mono text-sm">POST <?= e($baseUrl) ?>/api/v1/payins/create</code>.</p>
 </div>
 
 <div class="mb-6 flex flex-wrap justify-end gap-3">

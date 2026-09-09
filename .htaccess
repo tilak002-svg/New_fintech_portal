@@ -1,12 +1,24 @@
-# Defense in depth for hosts where the document root cannot be pointed at
-# /public: block direct access to everything except the public/ folder.
-# If your host lets you set the document root to /public directly, this
-# file is redundant but harmless.
+# Fallback for hosts where the document root cannot be pointed at /public
+# (e.g. Hostinger subdomains with no document-root editor). If your host
+# lets you set the document root to /public directly, none of this runs —
+# that request never reaches this file, since /public becomes the doc root
+# and this .htaccess sits outside it.
 
 RewriteEngine On
+
+# Block direct access to everything that isn't meant to be web-requestable,
+# even under this fallback.
 RewriteCond %{REQUEST_URI} !^/public/
-RewriteRule ^(config|includes|pages|database)/ - [F,L]
+RewriteRule ^(config|includes|pages|database|bin|storage)/ - [F,L]
 
 <FilesMatch "\.(env|sql|md)$">
     Require all denied
 </FilesMatch>
+
+# Internally forward every other request into public/, so URLs stay clean
+# (yourdomain.com/login, not yourdomain.com/public/login) even though the
+# document root is this folder, not public/ itself. public/.htaccess then
+# takes over exactly as it would if the doc root pointed at /public
+# directly — serving real files/assets as-is, or routing to index.php.
+RewriteCond %{REQUEST_URI} !^/public/
+RewriteRule ^(.*)$ public/$1 [L]

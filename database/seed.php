@@ -18,8 +18,8 @@ $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
 foreach ([
     'audit_logs', 'api_logs', 'notifications', 'support_messages', 'support_conversations',
     'gateway_daily_usage', 'gateway_hourly_usage', 'gateway_monthly_usage', 'webhook_events',
-    'payment_sessions', 'transactions', 'wallets', 'business_profiles', 'merchant_profiles',
-    'settlement_banks', 'kyc_documents', 'customer_whitelisted_ips', 'customer_api_credentials',
+    'chargeback_events', 'chargebacks', 'payment_sessions', 'transactions', 'wallets', 'business_profiles',
+    'merchant_profiles', 'settlement_banks', 'kyc_documents', 'customer_whitelisted_ips', 'customer_api_credentials',
     'platform_whitelisted_ips', 'platform_api_settings', 'login_attempts', 'payment_gateways', 'users',
 ] as $table) {
     $pdo->exec("TRUNCATE TABLE {$table}");

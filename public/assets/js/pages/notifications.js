@@ -7,12 +7,17 @@
         withdrawal: '<circle cx="12" cy="12" r="9"/><path d="M12 16V8M8.5 12.5 12 9l3.5 3.5"/>',
         support: '<path d="M4 5.5h16v10H9.5L5 19v-3.5H4Z"/><path d="M8 9.5h8M8 12.5h5"/>',
         security: '<path d="M12 3.5 19.5 6.5V11c0 5-3.2 8.2-7.5 9.5C7.7 19.2 4.5 16 4.5 11V6.5L12 3.5Z"/>',
+        // Admin/operator-only: gateway health, misconfiguration, and
+        // limit-reached alerts fanned out by notify_admins() (see
+        // includes/functions.php) — reuses icons.php's 'gateway' path.
+        gateway: '<rect x="3" y="9" width="7" height="7" rx="1.5"/><rect x="14" y="9" width="7" height="7" rx="1.5"/><path d="M10 12.5h4"/><path d="M6.5 9V6a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 17.5 6v3"/>',
     };
     const toneFor = {
         deposit: 'icon-chip-success',
         withdrawal: 'icon-chip-warning',
         support: 'icon-chip-info',
         security: 'icon-chip-brand',
+        gateway: 'icon-chip-warning',
     };
     function iconFor(type) {
         const path = iconSvg[type] || '<circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><circle cx="12" cy="16" r="0.9" fill="currentColor" stroke="none"/>';

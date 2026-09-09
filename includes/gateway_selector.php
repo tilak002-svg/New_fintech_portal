@@ -220,9 +220,10 @@ function record_gateway_outcome(PDO $pdo, int $gatewayId, bool $success): void
     $pdo->prepare('UPDATE payment_gateways SET consecutive_failures = consecutive_failures + 1 WHERE id = ?')
         ->execute([$gatewayId]);
 
-    $countStmt = $pdo->prepare('SELECT consecutive_failures FROM payment_gateways WHERE id = ?');
+    $countStmt = $pdo->prepare('SELECT display_name, consecutive_failures FROM payment_gateways WHERE id = ?');
     $countStmt->execute([$gatewayId]);
-    $failures = (int) $countStmt->fetchColumn();
+    $gatewayRow = $countStmt->fetch();
+    $failures = (int) ($gatewayRow['consecutive_failures'] ?? 0);
 
     if ($failures >= GATEWAY_AUTO_PAUSE_FAILURE_THRESHOLD) {
         $pdo->prepare(
@@ -233,6 +234,22 @@ function record_gateway_outcome(PDO $pdo, int $gatewayId, bool $success): void
             'consecutive_failures' => $failures,
             'pause_minutes' => GATEWAY_AUTO_PAUSE_MINUTES,
         ]);
+
+        // notifications.message is VARCHAR(255) — kept name-free and short
+        // (the title already carries the gateway name) so this never risks
+        // truncation regardless of how long display_name is (max 80 chars).
+        $gatewayName = $gatewayRow['display_name'] ?? "Gateway #{$gatewayId}";
+        notify_admins(
+            $pdo,
+            'gateway',
+            "{$gatewayName} auto-paused",
+            "{$failures} consecutive transactions failed, so this gateway was automatically paused for " . GATEWAY_AUTO_PAUSE_MINUTES . " minutes and skipped during routing. Source: gateway health.",
+            // No throttle needed on top of the failure-count gate itself —
+            // consecutive_failures resets to 0 on the next success, so this
+            // branch can't re-fire for the same gateway without a fresh
+            // run of 3 failures first.
+            0
+        );
     }
 }
 

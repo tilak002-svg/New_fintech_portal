@@ -429,7 +429,7 @@ CREATE TABLE platform_whitelisted_ips (
 -- Single admin-editable override for the API Base URL shown to every
 -- customer (Settings/API Access, API documentation). NULL api_base_url
 -- means "no override configured yet" — every reader falls back to
--- APP_URL + /api/v1 (see includes/functions.php's platform_api_base_url()).
+-- bare APP_URL (see includes/functions.php's platform_api_base_url()).
 CREATE TABLE platform_settings (
     id TINYINT UNSIGNED PRIMARY KEY DEFAULT 1,
     api_base_url VARCHAR(255) NULL,

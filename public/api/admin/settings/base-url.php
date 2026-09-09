@@ -20,7 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     json_response(true, [
         'api_base_url' => platform_api_base_url(),
         'is_override' => !empty($row['api_base_url']),
-        'default_url' => rtrim(APP_URL, '/') . '/api/v1',
+        'default_url' => rtrim(APP_URL, '/'),
         'updated_at' => $row['updated_at'] ?? null,
     ], 'ok');
 }
