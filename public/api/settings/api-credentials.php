@@ -104,7 +104,7 @@ if (!$creds['webhook_signing_secret_encrypted']) {
     }
 }
 
-$ipsStmt = $pdo->prepare('SELECT ip_address, created_at FROM customer_whitelisted_ips WHERE user_id = ? ORDER BY created_at ASC');
+$ipsStmt = $pdo->prepare("SELECT ip_address, status, created_at, updated_at FROM customer_whitelisted_ips WHERE user_id = ? ORDER BY created_at ASC");
 $ipsStmt->execute([$user['id']]);
 
 json_response(true, [

@@ -324,14 +324,9 @@ render_modal(
                         <span class="icon-chip-sm icon-chip-brand"><?= icon('shield', 'w-3.5 h-3.5') ?></span>
                         <h3 class="text-md font-semibold text-text-primary">Whitelisted IPs</h3>
                     </div>
-                    <p class="field-help mb-3">Only requests from these addresses can use this customer's API token.</p>
+                    <p class="field-help mb-3">Customers request their own IPs from Settings → API access. Approve or reject pending requests below.</p>
 
                     <ul id="api-ips-list" class="space-y-2 mb-4"></ul>
-
-                    <div class="flex flex-col sm:flex-row gap-3">
-                        <input type="text" id="api-ips-new" class="field-input flex-1" placeholder="e.g. 13.203.91.156">
-                        <button type="button" id="api-ips-add" class="btn-secondary shrink-0"><?= icon('plus', 'w-4 h-4') ?> Add IP</button>
-                    </div>
                     <p id="api-ips-error" class="field-error hidden mt-2"></p>
                 </div>
             </div>
@@ -339,6 +334,34 @@ render_modal(
 
         <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-border bg-surface-muted rounded-b-md">
             <button type="button" class="btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</dialog>
+
+<dialog id="merchant-gateways-modal"
+        class="rounded-md p-0 backdrop:bg-black/40 w-full max-w-lg"
+        aria-labelledby="merchant-gateways-title">
+
+    <div class="flex flex-col">
+        <div class="flex items-start justify-between gap-4 px-6 py-5 border-b border-border">
+            <div>
+                <h2 id="merchant-gateways-title" class="text-3xl font-semibold text-text-primary">Assigned gateways</h2>
+                <p id="merchant-gateways-target" class="text-sm text-text-secondary mt-0.5"></p>
+            </div>
+            <button type="button" class="btn-icon shrink-0" data-modal-close aria-label="Close dialog">
+                <?= icon('close', 'w-5 h-5') ?>
+            </button>
+        </div>
+
+        <div class="px-6 py-5 space-y-3 max-h-[70vh] overflow-y-auto">
+            <p class="field-help">Check the gateways this merchant may be routed through, and set the order to try them in — lower number first. A merchant with nothing checked cannot create a PayIn.</p>
+            <ul id="merchant-gateways-list" class="space-y-2"></ul>
+            <p id="merchant-gateways-error" class="field-error hidden mt-2"></p>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-border bg-surface-muted rounded-b-md">
+            <button type="button" class="btn-secondary" data-modal-close>Close</button>
+            <button type="button" id="merchant-gateways-save" class="btn-primary">Save</button>
         </div>
     </div>
 </dialog>

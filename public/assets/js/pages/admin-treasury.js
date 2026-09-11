@@ -1,13 +1,13 @@
 ﻿(function () {
     'use strict';
-    const { apiFetch, escapeHtml, formatMoney: money } = window.Verapay;
+    const { apiFetch, escapeHtml, formatMoney: money, formatIST } = window.Verapay;
 
     const form = document.getElementById('treasury-filters');
     const perPageSelect = document.getElementById('treasury-per-page');
     const tbody = document.getElementById('treasury-tbody');
     const pagination = document.getElementById('treasury-pagination');
     const downloadLink = document.getElementById('treasury-download');
-    const colCount = 8;
+    const colCount = 9;
 
     let searchDebounce;
 
@@ -77,7 +77,7 @@
 
         tbody.innerHTML = data.entries.map((row) => `
             <tr class="border-l-4 ${statusBorderClass(row.status)}">
-                <td class="text-text-secondary whitespace-nowrap">${new Date(row.created_at).toLocaleString()}</td>
+                <td class="text-text-secondary whitespace-nowrap">${formatIST(row.created_at)}</td>
                 <td>
                     <span class="block text-md text-text-primary">${escapeHtml(row.merchant_name)}</span>
                     <span class="block text-sm text-text-secondary">${escapeHtml(row.merchant_email)}</span>
@@ -89,6 +89,7 @@
                     </span>
                 </td>
                 <td class="font-mono text-sm">${escapeHtml(row.reference)}</td>
+                <td>${row.gateway_name ? escapeHtml(row.gateway_name) : '<span class="text-text-secondary">—</span>'}</td>
                 <td class="table-amount text-success">${row.type === 'deposit' ? money(row.amount) : '—'}</td>
                 <td class="table-amount text-danger">${row.type === 'withdrawal' ? money(row.amount) : '—'}</td>
                 <td class="table-amount font-medium">${money(row.running_balance)}</td>

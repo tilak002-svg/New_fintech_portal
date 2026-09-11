@@ -13,6 +13,12 @@ render_hero_banner($user, 'Chargebacks', 'Disputes raised against merchants\' su
             <input type="search" id="f-search" name="search" class="field-input" placeholder="CB-12, DX-A1B2, ORD-1001, Acme Co…">
         </div>
         <div>
+            <label for="f-customer" class="field-label">Customer</label>
+            <select id="f-customer" name="user_id" class="field-input">
+                <option value="">All customers</option>
+            </select>
+        </div>
+        <div>
             <label for="f-status" class="field-label">Status</label>
             <select id="f-status" name="status" class="field-input">
                 <option value="" <?= $initialStatus === '' ? 'selected' : '' ?>>All statuses</option>

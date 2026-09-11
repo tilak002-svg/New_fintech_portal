@@ -35,6 +35,16 @@ define('PLATFORM_JWT_SECRET', env('PLATFORM_JWT_SECRET', 'dev-only-insecure-secr
 // up and re-encrypt existing gateways before changing it in production.
 define('GATEWAY_ENCRYPTION_KEY', env('GATEWAY_ENCRYPTION_KEY', null));
 
+// Cache-busting query string appended to every JS asset (see
+// includes/footer.php). Some hosts front the site with a CDN that caches
+// static files independent of the browser — a viewer can hard-refresh or
+// use Incognito and still get a stale app.js. Bump this string by hand
+// after any JS deploy that must reach viewers immediately, so the query
+// string changes and both the browser and any CDN in front of it treat it
+// as a new file. Any value works as long as it changes; date-based is just
+// easy to eyeball.
+define('ASSET_VERSION', '20260913-1');
+
 error_reporting(E_ALL);
 ini_set('display_errors', APP_DEBUG ? '1' : '0');
 ini_set('log_errors', '1');

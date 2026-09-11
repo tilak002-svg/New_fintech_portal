@@ -58,6 +58,7 @@ render_hero_banner(
 
     <div id="kv-failure-detail" class="hidden mt-5 pt-5 border-t border-border">
         <div class="rounded-md border border-danger/30 bg-danger-bg px-4 py-3 text-sm text-text-primary" id="kv-failure-message"></div>
+        <button type="button" class="btn-secondary mt-3 hidden" id="kv-request-ip-btn"></button>
     </div>
 
     <div class="flex flex-col sm:flex-row items-center gap-3 mt-6">

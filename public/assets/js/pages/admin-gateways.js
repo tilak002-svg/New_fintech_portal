@@ -8,7 +8,8 @@
         escapeHtml,
         openModal,
         closeModal,
-        formatMoney
+        formatMoney,
+        formatIST
     } = window.Verapay;
 
     const providerNames = {
@@ -71,7 +72,7 @@
     syncPublicKeyRequirement();
 
     function timeLabel(iso) {
-        return new Date(iso).toLocaleDateString(undefined, {
+        return formatIST(iso, {
             month: 'short',
             day: 'numeric',
             year: 'numeric'

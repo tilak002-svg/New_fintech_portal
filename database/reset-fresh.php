@@ -25,7 +25,7 @@ foreach ([
     'notifications', 'support_messages', 'support_conversations',
     'customer_webhook_deliveries', 'webhook_events', 'payment_sessions',
     'gateway_daily_usage', 'gateway_hourly_usage', 'gateway_monthly_usage',
-    'transactions', 'payment_gateways',
+    'transactions', 'merchant_gateway_assignments', 'payment_gateways',
     'wallets', 'business_profiles', 'merchant_profiles', 'settlement_banks', 'kyc_documents',
     'customer_whitelisted_ips', 'customer_api_credentials',
     'platform_whitelisted_ips', 'platform_api_settings',

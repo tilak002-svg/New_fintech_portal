@@ -1,6 +1,6 @@
 (function () {
     'use strict';
-    const { apiFetch, showToast, setButtonLoading, escapeHtml } = window.Verapay;
+    const { apiFetch, showToast, setButtonLoading, escapeHtml, formatIST } = window.Verapay;
 
     const POLL_INTERVAL_MS = 4000;
     let activeConversationId = null;
@@ -8,7 +8,7 @@
     let pollTimer = null;
 
     function timeLabel(iso) {
-        return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        return formatIST(iso, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     }
 
     function avatarMarkup(id, gender, fallbackInitial) {

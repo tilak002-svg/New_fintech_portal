@@ -44,17 +44,23 @@ const GATEWAY_AUTO_PAUSE_MINUTES = 15;
  * per_transaction_limit_amount is checked first since it needs no lock —
  * cheapest rejection, done before touching the database at all.
  *
+ * @param int $userId The merchant this selection is for — gates on
+ *   merchant_gateway_assignments (a merchant only ever sees gateways an
+ *   admin has explicitly assigned to them, ordered by that assignment's
+ *   OWN priority, not the gateway's global default) and fails closed
+ *   ('no_assigned_gateways') if the merchant has none.
  * @param string $direction 'payin' or 'payout' — gates on payin_enabled/
  *   payout_enabled and, for a non-mock gateway, on that direction's real
  *   provider credentials (see the is_mock/credential-completeness check
  *   in the loop below).
  * @return array{gateway: array|null, reason: string|null} reason is one of
- *   null (success), 'no_active_gateways', or 'no_eligible_gateway' (covers
- *   every per-candidate skip below: direction disabled, ticket size out of
+ *   null (success), 'no_assigned_gateways' (merchant has no active
+ *   gateway assignment at all), or 'no_eligible_gateway' (covers every
+ *   per-candidate skip below: direction disabled, ticket size out of
  *   range, capacity exhausted, or a real-provider gateway with no usable
  *   credentials).
  */
-function select_and_reserve_gateway(PDO $pdo, string $amount, bool $sandboxOnly = false, string $direction = 'payin'): array
+function select_and_reserve_gateway(PDO $pdo, int $userId, string $amount, bool $sandboxOnly = false, string $direction = 'payin'): array
 {
     // $sandboxOnly is additive and used only by the API docs' "Try it"
     // tester (see public/api/v1/try/*.php) — every existing caller omits
@@ -64,20 +70,21 @@ function select_and_reserve_gateway(PDO $pdo, string $amount, bool $sandboxOnly 
     // place to guarantee a test request can never reach a live gateway.
     $directionColumn = $direction === 'payout' ? 'payout_enabled' : 'payin_enabled';
     $gatewaysStmt = $pdo->prepare(
-        "SELECT id, display_name, provider, priority, daily_limit_amount, hourly_limit_amount, monthly_limit_amount, per_transaction_limit_amount,
-                min_ticket_size, max_ticket_size, public_key, api_key_encrypted, payout_account_number, sandbox_mode, is_mock
-         FROM payment_gateways
-         WHERE status = \"active\"
-           AND {$directionColumn} = 1
-           AND (auto_paused_until IS NULL OR auto_paused_until <= UTC_TIMESTAMP())"
-        . ($sandboxOnly ? ' AND sandbox_mode = 1' : '') .
-        ' ORDER BY priority ASC, id ASC'
+        "SELECT pg.id, pg.display_name, pg.provider, mga.priority, pg.daily_limit_amount, pg.hourly_limit_amount, pg.monthly_limit_amount, pg.per_transaction_limit_amount,
+                pg.min_ticket_size, pg.max_ticket_size, pg.public_key, pg.api_key_encrypted, pg.payout_account_number, pg.sandbox_mode, pg.is_mock
+         FROM payment_gateways pg
+         INNER JOIN merchant_gateway_assignments mga ON mga.gateway_id = pg.id AND mga.user_id = ? AND mga.is_enabled = 1
+         WHERE pg.status = \"active\"
+           AND pg.{$directionColumn} = 1
+           AND (pg.auto_paused_until IS NULL OR pg.auto_paused_until <= UTC_TIMESTAMP())"
+        . ($sandboxOnly ? ' AND pg.sandbox_mode = 1' : '') .
+        ' ORDER BY mga.priority ASC, pg.id ASC'
     );
-    $gatewaysStmt->execute();
+    $gatewaysStmt->execute([$userId]);
     $gateways = $gatewaysStmt->fetchAll();
 
     if (!$gateways) {
-        return ['gateway' => null, 'reason' => 'no_active_gateways'];
+        return ['gateway' => null, 'reason' => 'no_assigned_gateways'];
     }
 
     $today = gmdate('Y-m-d');
@@ -220,9 +227,10 @@ function record_gateway_outcome(PDO $pdo, int $gatewayId, bool $success): void
     $pdo->prepare('UPDATE payment_gateways SET consecutive_failures = consecutive_failures + 1 WHERE id = ?')
         ->execute([$gatewayId]);
 
-    $countStmt = $pdo->prepare('SELECT consecutive_failures FROM payment_gateways WHERE id = ?');
+    $countStmt = $pdo->prepare('SELECT display_name, consecutive_failures FROM payment_gateways WHERE id = ?');
     $countStmt->execute([$gatewayId]);
-    $failures = (int) $countStmt->fetchColumn();
+    $gatewayRow = $countStmt->fetch();
+    $failures = (int) ($gatewayRow['consecutive_failures'] ?? 0);
 
     if ($failures >= GATEWAY_AUTO_PAUSE_FAILURE_THRESHOLD) {
         $pdo->prepare(
@@ -233,6 +241,22 @@ function record_gateway_outcome(PDO $pdo, int $gatewayId, bool $success): void
             'consecutive_failures' => $failures,
             'pause_minutes' => GATEWAY_AUTO_PAUSE_MINUTES,
         ]);
+
+        // notifications.message is VARCHAR(255) — kept name-free and short
+        // (the title already carries the gateway name) so this never risks
+        // truncation regardless of how long display_name is (max 80 chars).
+        $gatewayName = $gatewayRow['display_name'] ?? "Gateway #{$gatewayId}";
+        notify_admins(
+            $pdo,
+            'gateway',
+            "{$gatewayName} auto-paused",
+            "{$failures} consecutive transactions failed, so this gateway was automatically paused for " . GATEWAY_AUTO_PAUSE_MINUTES . " minutes and skipped during routing. Source: gateway health.",
+            // No throttle needed on top of the failure-count gate itself —
+            // consecutive_failures resets to 0 on the next success, so this
+            // branch can't re-fire for the same gateway without a fresh
+            // run of 3 failures first.
+            0
+        );
     }
 }
 

@@ -7,7 +7,9 @@
         setButtonLoading,
         escapeHtml,
         openModal,
-        closeModal
+        closeModal,
+        formatIST,
+        formatISTDate
     } = window.Verapay;
 
     const form = document.getElementById('filters-form');
@@ -138,7 +140,7 @@
                 </td>
 
                 <td class="text-text-secondary whitespace-nowrap">
-                    ${new Date(u.created_at).toLocaleDateString()}
+                    ${formatISTDate(u.created_at)}
                 </td>
 
                 <td class="text-right">
@@ -159,6 +161,13 @@
                                         data-id="${u.id}"
                                         data-name="${escapeHtml(u.name)}">
                                     API access
+                                </button>
+
+                                <button type="button"
+                                        class="btn-ghost !px-3 !py-2 merchant-gateways-btn"
+                                        data-id="${u.id}"
+                                        data-name="${escapeHtml(u.name)}">
+                                    Gateways
                                 </button>
                             `
                             : ''}
@@ -228,6 +237,14 @@
             .forEach((btn) => {
                 btn.addEventListener('click', () => {
                     openApiIpsModal(btn.dataset.id, btn.dataset.name);
+                });
+            });
+
+        tbody
+            .querySelectorAll('.merchant-gateways-btn')
+            .forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    openMerchantGatewaysModal(btn.dataset.id, btn.dataset.name);
                 });
             });
 
@@ -474,6 +491,7 @@
         });
 
     let apiIpsTargetId = null;
+    let merchantGatewaysTargetId = null;
 
     async function loadApiIps() {
         const { success, data, message } = await apiFetch(`/api/admin/users/api-ips.php?user_id=${apiIpsTargetId}`);
@@ -489,7 +507,7 @@
         if (data.has_api_credentials) {
             document.getElementById('api-ips-client-key').textContent = data.client_key;
             document.getElementById('api-ips-token-status').innerHTML = data.has_bearer_token
-                ? `<span class="badge-success">Generated</span> <span class="text-xs text-text-secondary block mt-0.5">${new Date(data.bearer_token_generated_at).toLocaleString()}</span>`
+                ? `<span class="badge-success">Generated</span> <span class="text-xs text-text-secondary block mt-0.5">${formatIST(data.bearer_token_generated_at)}</span>`
                 : '<span class="badge-neutral">Not generated</span>';
             document.getElementById('api-ips-payin-url').innerHTML = data.payin_callback_url
                 ? escapeHtml(data.payin_callback_url)
@@ -499,18 +517,32 @@
                 : '<span class="text-text-secondary">Not set</span>';
         }
 
+        const ipBadgeClass = { pending: 'badge-warning', approved: 'badge-success', rejected: 'badge-danger' };
+        const ipBadgeLabel = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' };
+
         const list = document.getElementById('api-ips-list');
         if (!data.whitelisted_ips.length) {
-            list.innerHTML = '<li class="text-sm text-text-secondary rounded-sm border border-dashed border-border px-3 py-3 text-center">No IPs whitelisted yet.</li>';
+            list.innerHTML = '<li class="text-sm text-text-secondary rounded-sm border border-dashed border-border px-3 py-3 text-center">No IP requests yet.</li>';
         } else {
-            list.innerHTML = data.whitelisted_ips.map((row) => `
+            list.innerHTML = data.whitelisted_ips.map((row) => {
+                const actions = row.status === 'pending'
+                    ? `<button type="button" class="btn-secondary !px-2.5 !py-1.5 !text-xs" data-approve-ip="${row.id}">Approve</button>
+                       <button type="button" class="btn-danger !px-2.5 !py-1.5 !text-xs" data-reject-ip="${row.id}">Reject</button>`
+                    : row.status === 'approved'
+                        ? `<button type="button" class="btn-icon shrink-0 text-lg leading-none" data-remove-ip="${row.id}" aria-label="Revoke ${escapeHtml(row.ip_address)}">×</button>`
+                        : '';
+                return `
                 <li class="flex items-center justify-between gap-3 rounded-sm border border-border px-3 py-2.5">
                     <span class="min-w-0">
-                        <span class="block font-mono text-sm text-text-primary">${escapeHtml(row.ip_address)}</span>
-                        <span class="block text-xs text-text-secondary">Added ${new Date(row.created_at).toLocaleDateString()}${row.added_by_name ? ` by ${escapeHtml(row.added_by_name)}` : ''}</span>
+                        <span class="flex items-center gap-2">
+                            <span class="font-mono text-sm text-text-primary">${escapeHtml(row.ip_address)}</span>
+                            <span class="${ipBadgeClass[row.status] || 'badge-neutral'} !text-xs">${ipBadgeLabel[row.status] || row.status}</span>
+                        </span>
+                        <span class="block text-xs text-text-secondary">Requested ${formatISTDate(row.created_at)}${row.reviewed_by_name ? ` · Reviewed by ${escapeHtml(row.reviewed_by_name)}` : ''}</span>
                     </span>
-                    <button type="button" class="btn-icon shrink-0 text-lg leading-none" data-remove-ip="${row.id}" aria-label="Remove ${escapeHtml(row.ip_address)}">×</button>
-                </li>`).join('');
+                    <span class="flex items-center gap-2 shrink-0">${actions}</span>
+                </li>`;
+            }).join('');
 
             list.querySelectorAll('[data-remove-ip]').forEach((btn) => {
                 btn.addEventListener('click', async () => {
@@ -520,11 +552,45 @@
                         { method: 'POST', body: { id: btn.dataset.removeIp } }
                     );
                     if (!removeSuccess) {
-                        showToast(removeMessage || 'Unable to remove that IP.', 'error');
+                        showToast(removeMessage || 'Unable to revoke that IP.', 'error');
                         btn.disabled = false;
                         return;
                     }
-                    showToast('IP removed.', 'success');
+                    showToast('IP revoked.', 'success');
+                    loadApiIps();
+                });
+            });
+
+            list.querySelectorAll('[data-approve-ip]').forEach((btn) => {
+                btn.addEventListener('click', async () => {
+                    btn.disabled = true;
+                    const { success: approveSuccess, message: approveMessage } = await apiFetch(
+                        '/api/admin/users/approve-api-ip.php',
+                        { method: 'POST', body: { id: btn.dataset.approveIp } }
+                    );
+                    if (!approveSuccess) {
+                        showToast(approveMessage || 'Unable to approve that request.', 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+                    showToast('IP approved.', 'success');
+                    loadApiIps();
+                });
+            });
+
+            list.querySelectorAll('[data-reject-ip]').forEach((btn) => {
+                btn.addEventListener('click', async () => {
+                    btn.disabled = true;
+                    const { success: rejectSuccess, message: rejectMessage } = await apiFetch(
+                        '/api/admin/users/reject-api-ip.php',
+                        { method: 'POST', body: { id: btn.dataset.rejectIp } }
+                    );
+                    if (!rejectSuccess) {
+                        showToast(rejectMessage || 'Unable to reject that request.', 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+                    showToast('IP rejected.', 'success');
                     loadApiIps();
                 });
             });
@@ -534,40 +600,92 @@
     function openApiIpsModal(userId, name) {
         apiIpsTargetId = userId;
         document.getElementById('api-ips-target').textContent = `Manage which IPs can use ${name}'s API token.`;
-        document.getElementById('api-ips-new').value = '';
         document.getElementById('api-ips-error').classList.add('hidden');
         openModal('api-ips-modal');
         loadApiIps();
     }
 
-    document.getElementById('api-ips-add').addEventListener('click', async (e) => {
-        const btn = e.currentTarget;
-        const input = document.getElementById('api-ips-new');
-        const errorEl = document.getElementById('api-ips-error');
-        errorEl.classList.add('hidden');
+    async function loadMerchantGateways() {
+        const { success, data, message } = await apiFetch(`/api/admin/users/merchant-gateways.php?user_id=${merchantGatewaysTargetId}`);
 
-        if (!input.value.trim()) {
-            errorEl.textContent = 'Enter an IP address first.';
-            errorEl.classList.remove('hidden');
+        if (!success) {
+            showToast(message || 'Unable to load gateways.', 'error');
             return;
         }
 
+        const list = document.getElementById('merchant-gateways-list');
+        if (!data.gateways.length) {
+            list.innerHTML = '<li class="text-sm text-text-secondary rounded-sm border border-dashed border-border px-3 py-3 text-center">No gateways configured on the platform yet.</li>';
+            return;
+        }
+
+        list.innerHTML = data.gateways.map((g) => `
+            <li class="flex items-center justify-between gap-3 rounded-sm border border-border px-3 py-2.5">
+                <label class="flex items-center gap-2.5 min-w-0">
+                    <input type="checkbox"
+                           class="mga-enabled"
+                           data-gateway-id="${g.id}"
+                           ${g.is_enabled ? 'checked' : ''}>
+                    <span class="min-w-0">
+                        <span class="block text-sm font-medium text-text-primary truncate">${escapeHtml(g.display_name)}</span>
+                        <span class="block text-xs text-text-secondary">${escapeHtml(g.provider)}${g.status !== 'active' ? ' · inactive' : ''}</span>
+                    </span>
+                </label>
+                <input type="number"
+                       min="1"
+                       class="field-input !w-20 !py-1.5 mga-priority"
+                       data-gateway-id="${g.id}"
+                       value="${g.assigned_priority ?? g.default_priority}"
+                       aria-label="Priority for ${escapeHtml(g.display_name)}">
+            </li>`).join('');
+    }
+
+    function openMerchantGatewaysModal(userId, name) {
+        merchantGatewaysTargetId = userId;
+        document.getElementById('merchant-gateways-target').textContent = `Choose which payment gateways ${name} can be routed through, and in what order.`;
+        document.getElementById('merchant-gateways-error').classList.add('hidden');
+        openModal('merchant-gateways-modal');
+        loadMerchantGateways();
+    }
+
+    document.getElementById('merchant-gateways-save').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const errorEl = document.getElementById('merchant-gateways-error');
+        errorEl.classList.add('hidden');
+
+        const assignments = Array.from(document.querySelectorAll('#merchant-gateways-list .mga-enabled'))
+            .filter((cb) => cb.checked)
+            .map((cb) => {
+                const gatewayId = cb.dataset.gatewayId;
+                const priorityInput = document.querySelector(`.mga-priority[data-gateway-id="${gatewayId}"]`);
+                return { gateway_id: gatewayId, priority: Number(priorityInput.value) || 1, enabled: true };
+            });
+
+        // Catch duplicate priorities locally before round-tripping to the
+        // server — same rule assign-gateways.php enforces authoritatively.
+        const usedPriorities = new Set();
+        for (const a of assignments) {
+            if (usedPriorities.has(a.priority)) {
+                errorEl.textContent = `Priority ${a.priority} is used by more than one gateway — each checked gateway needs a distinct priority.`;
+                errorEl.classList.remove('hidden');
+                return;
+            }
+            usedPriorities.add(a.priority);
+        }
+
         setButtonLoading(btn, true);
-        const { success, message } = await apiFetch('/api/admin/users/add-api-ip.php', {
+        const { success, message } = await apiFetch('/api/admin/users/assign-gateways.php', {
             method: 'POST',
-            body: { user_id: apiIpsTargetId, ip_address: input.value.trim() },
+            body: { user_id: merchantGatewaysTargetId, assignments },
         });
         setButtonLoading(btn, false);
 
         if (!success) {
-            errorEl.textContent = message || 'Unable to add that IP.';
+            errorEl.textContent = message || 'Unable to save gateway assignments.';
             errorEl.classList.remove('hidden');
             return;
         }
-
-        input.value = '';
-        showToast('IP whitelisted.', 'success');
-        loadApiIps();
+        showToast(message || 'Gateway assignments saved.', 'success');
     });
 
     form.addEventListener('input', (event) => {

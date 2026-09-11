@@ -87,7 +87,13 @@ function create_gateway_order(array $gateway, string $reference, string $amountR
                 throw new GatewayOrderAmbiguousException($e->getMessage(), 0, $e);
             }
             return [
-                'gateway_txn_id' => $order['cf_order_id'] ?? $order['order_id'],
+                // Cashfree's "Get Order" status API (cashfree_fetch_payin_status())
+                // and webhook matching (cashfree_parse_webhook_payload()) both key
+                // off the MERCHANT's own order_id, never Cashfree's internal
+                // numeric cf_order_id — storing cf_order_id here made every
+                // reconciliation status check silently 404 and get folded into
+                // "still pending" instead of surfacing as an error.
+                'gateway_txn_id' => $order['order_id'],
                 'checkout' => [
                     'provider' => 'cashfree',
                     'payment_session_id' => $order['payment_session_id'],

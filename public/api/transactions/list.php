@@ -22,6 +22,16 @@ if (in_array($_GET['type'] ?? '', ['deposit', 'withdrawal'], true)) {
     $params['type'] = $_GET['type'];
 }
 
+// Admin/operator only — an exact-match "view this one customer's
+// transactions" filter, distinct from the free-text search above (which
+// LIKE-matches name/email and can pull in unrelated partial matches). A
+// customer viewing their own transactions is already scoped to themselves
+// regardless, so this filter is meaningless (and ignored) on that path.
+if ($isOperator && !empty($_GET['user_id']) && ctype_digit((string) $_GET['user_id'])) {
+    $where[] = 't.user_id = :filter_user_id';
+    $params['filter_user_id'] = (int) $_GET['user_id'];
+}
+
 // Additive filter distinguishing merchant-API-driven activity (PayIns/
 // PayOuts, merchant_order_id set) from legacy browser-wallet activity —
 // used by pages/admin/payins.php and admin/payouts.php. Omitted entirely
@@ -49,14 +59,35 @@ if (!empty($_GET['to'])) {
 if (!empty($_GET['search'])) {
     // Real (non-emulated) prepared statements require a distinct bound
     // parameter per placeholder occurrence, even when the value repeats.
+    // Covers both PayIn (end_customer_*) and PayOut (beneficiary_name)
+    // fields in one shared clause — a PayIn row's beneficiary_name is
+    // NULL (and vice versa), so LIKE against it is simply false, never
+    // an error. This must stay in sync with what admin/payins.php and
+    // admin/payouts.php's search field labels promise.
     $needle = '%' . $_GET['search'] . '%';
     if ($isOperator) {
-        $where[] = '(t.reference LIKE :search1 OR u.name LIKE :search2 OR u.email LIKE :search3)';
-        $params['search1'] = $params['search2'] = $params['search3'] = $needle;
+        $where[] = '(t.reference LIKE :search1 OR u.name LIKE :search2 OR u.email LIKE :search3
+                      OR t.merchant_order_id LIKE :search4 OR t.end_customer_name LIKE :search5
+                      OR t.end_customer_email LIKE :search6 OR t.beneficiary_name LIKE :search7
+                      OR t.gateway_txn_id LIKE :search8)';
+        $params['search1'] = $params['search2'] = $params['search3'] = $params['search4']
+            = $params['search5'] = $params['search6'] = $params['search7'] = $params['search8'] = $needle;
     } else {
-        $where[] = 't.reference LIKE :search1';
-        $params['search1'] = $needle;
+        $where[] = '(t.reference LIKE :search1 OR t.merchant_order_id LIKE :search2
+                      OR t.end_customer_name LIKE :search3 OR t.end_customer_email LIKE :search4
+                      OR t.beneficiary_name LIKE :search5 OR t.gateway_txn_id LIKE :search6)';
+        $params['search1'] = $params['search2'] = $params['search3'] = $params['search4']
+            = $params['search5'] = $params['search6'] = $needle;
     }
+}
+
+// Provider filter — matches the canonical provider list in
+// public/api/admin/gateways/create.php. Requires joining payment_gateways
+// (added to both the row and count queries below).
+$allowedProviders = ['razorpay', 'cashfree', 'payu', 'stripe', 'paypal', 'other'];
+if (in_array($_GET['provider'] ?? '', $allowedProviders, true)) {
+    $where[] = 'pg.provider = :provider';
+    $params['provider'] = $_GET['provider'];
 }
 
 $sortMap = [
@@ -107,8 +138,8 @@ foreach ($transactions as &$row) {
 unset($row);
 
 $countSql = $isOperator
-    ? "SELECT COUNT(*) FROM transactions t JOIN users u ON u.id = t.user_id WHERE {$whereSql}"
-    : "SELECT COUNT(*) FROM transactions t WHERE {$whereSql}";
+    ? "SELECT COUNT(*) FROM transactions t JOIN users u ON u.id = t.user_id LEFT JOIN payment_gateways pg ON pg.id = t.gateway_id WHERE {$whereSql}"
+    : "SELECT COUNT(*) FROM transactions t LEFT JOIN payment_gateways pg ON pg.id = t.gateway_id WHERE {$whereSql}";
 $countStmt = $pdo->prepare($countSql);
 foreach ($params as $key => $value) {
     $countStmt->bindValue(":{$key}", $value);

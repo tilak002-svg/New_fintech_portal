@@ -53,7 +53,7 @@ if ($userStmt->fetchColumn() !== 'active') {
     json_response(false, null, 'This account is not active.', 403, 'ACCOUNT_INACTIVE');
 }
 
-$ipStmt = $pdo->prepare('SELECT 1 FROM customer_whitelisted_ips WHERE user_id = ? AND ip_address = ?');
+$ipStmt = $pdo->prepare("SELECT 1 FROM customer_whitelisted_ips WHERE user_id = ? AND ip_address = ? AND status = 'approved'");
 $ipStmt->execute([$userId, $ip]);
 if (!$ipStmt->fetchColumn()) {
     write_audit_log($userId, 'api_token_exchange_blocked_ip', 'user', $userId, ['ip' => $ip]);

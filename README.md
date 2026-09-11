@@ -232,9 +232,11 @@ All endpoints return `{ "success": bool, "data": ..., "message": "...", "error_c
 | `/api/webhooks/razorpay.php` | POST | Public (provider-authenticated via signature, not a session). `?gateway_id=` |
 | `/api/webhooks/cashfree.php` | POST | Public (provider-authenticated via signature). `?gateway_id=` |
 | `/api/webhooks/gateway.php` | POST | Public. Generic fallback receiver — placeholder signature scheme, see `includes/gateway_webhooks.php` |
-| `/api/admin/users/api-ips.php` | GET | Admin only. A customer's API credentials + IP whitelist |
-| `/api/admin/users/add-api-ip.php` | POST | Admin only |
-| `/api/admin/users/remove-api-ip.php` | POST | Admin only |
+| `/api/admin/users/api-ips.php` | GET | Admin only. A customer's API credentials + IP whitelist requests |
+| `/api/admin/users/approve-api-ip.php` | POST | Admin only. Approves a pending IP whitelist request |
+| `/api/admin/users/reject-api-ip.php` | POST | Admin only. Rejects a pending IP whitelist request |
+| `/api/admin/users/remove-api-ip.php` | POST | Admin only. Revokes an already-approved IP |
+| `/api/settings/request-api-ip.php` | POST | Customer only. Submits an IP whitelist request for review |
 | `/api/auth/api-token.php` | POST | Public (client_key/secret_key authenticated). Exchanges credentials for a bearer token; IP-whitelist-gated |
 | `/api/settings/api-credentials.php` | GET | Customer only. Auto-provisions client_key/secret_key and a webhook signing secret on first load |
 | `/api/settings/rotate-api-secret.php` | POST | Customer only |

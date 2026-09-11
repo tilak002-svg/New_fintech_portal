@@ -96,18 +96,47 @@ function create_payin(PDO $pdo, array $merchant, array $input, bool $sandboxOnly
         // Capacity is reserved against the gross amount — the figure that
         // actually flows through the pay-in gateway — same rule as
         // deposit_service.php::create_deposit().
-        $selection = select_and_reserve_gateway($pdo, $amount, $sandboxOnly, 'payin');
+        $selection = select_and_reserve_gateway($pdo, (int) $merchant['id'], $amount, $sandboxOnly, 'payin');
         if ($selection['gateway'] === null) {
             $pdo->rollBack();
             write_audit_log($merchant['id'], 'payin_gateway_unavailable', 'transaction', null, ['amount' => $amount, 'merchant_order_id' => $merchantOrderId, 'reason' => $selection['reason']]);
-            $message = $sandboxOnly
-                ? 'No sandbox-mode gateway is currently configured. Ask your platform admin to enable one for testing.'
-                : 'PayIns are temporarily unavailable. Please try again shortly.';
+            $isNoAssignment = $selection['reason'] === 'no_assigned_gateways';
+            $isNoCapacity = $selection['reason'] === 'no_eligible_gateway';
+            // Not alerted for the sandboxOnly path — that's just the API
+            // docs' "Try it" tester finding no sandbox gateway configured
+            // yet, not a real production incident. A missing merchant
+            // assignment IS worth alerting even in sandbox — it's an admin
+            // setup gap, not a transient capacity issue.
+            if (!$sandboxOnly || $isNoAssignment) {
+                notify_admins(
+                    $pdo,
+                    'gateway',
+                    $isNoAssignment
+                        ? 'PayIn blocked: merchant has no assigned gateway'
+                        : ($isNoCapacity ? 'PayIn blocked: every gateway is paused or over its limit' : 'PayIn blocked: no active payment gateway'),
+                    $isNoAssignment
+                        ? "{$merchant['name']} (user #{$merchant['id']}) attempted a payin for {$amount} INR but has no payment gateway assigned. Assign one from Admin -> Users -> Gateways."
+                        : ($isNoCapacity
+                            ? "A payin for {$amount} INR could not be routed — every active gateway is either auto-paused or would exceed a configured daily/hourly/monthly/per-transaction limit. Source: limit reached."
+                            : 'A payin could not be routed — no payment gateway is active. Source: our application (configuration).')
+                );
+            }
+            $message = $isNoAssignment
+                ? 'Your account has no payment gateway configured yet. Contact support to have one assigned.'
+                : ($sandboxOnly
+                    ? 'No sandbox-mode gateway is currently configured. Ask your platform admin to enable one for testing.'
+                    : 'PayIns are temporarily unavailable. Please try again shortly.');
             return ['ok' => false, 'status_code' => 503, 'message' => $message, 'data' => null];
         }
         $gateway = $selection['gateway'];
         $gatewayId = (int) $gateway['id'];
         $liveGatewayConfigured = gateway_supports_live_order_creation($gateway);
+        // Distinct from $liveGatewayConfigured: a gateway an admin explicitly
+        // flagged as mock/test (Admin -> Payment gateways) vs. a real
+        // razorpay/cashfree row that simply isn't fully configured yet. Both
+        // are "not live-configured", but only the former should ever be
+        // silently simulated — see the three-way branch below.
+        $isMockGateway = !empty($gateway['is_mock']);
         // Always created pending and held in pending_balance, then resolved
         // through the exact same apply_transaction_outcome() the webhook/
         // reconciliation paths use — including the instant-success sandbox
@@ -170,7 +199,14 @@ function create_payin(PDO $pdo, array $merchant, array $input, bool $sandboxOnly
                  VALUES (?, ?, ?, ?, ?, "created", ?)'
             )->execute([$sessionToken, $txnId, $gatewayId, json_encode($orderResult['checkout']), $returnUrl, $expiresAt]);
 
-            $paymentUrl = rtrim(APP_URL, '/') . '/pay?session=' . $sessionToken;
+            // platform_api_base_url() (admin-configurable override, falls
+            // back to APP_URL) — not raw APP_URL — so the checkout URL a
+            // merchant's customer actually lands on always matches whatever
+            // Base URL is shown in Admin -> Settings and on /api-docs,
+            // instead of silently staying on the old domain if that's ever
+            // changed. Same class of bug already fixed for the webhook URL
+            // in public/api/admin/gateways/list.php.
+            $paymentUrl = platform_api_base_url() . '/pay?session=' . $sessionToken;
             $message = 'Redirect your customer to payment_url to complete this payin.';
         } catch (GatewayOrderAmbiguousException $e) {
             // We do not know if the provider actually created the order —
@@ -178,13 +214,37 @@ function create_payin(PDO $pdo, array $merchant, array $input, bool $sandboxOnly
             // no session; only a webhook or manual reconciliation resolves it.
             error_log('[create_payin] gateway order ambiguous: ' . $e->getMessage());
             write_audit_log($merchant['id'], 'payin_gateway_order_ambiguous', 'transaction', $txnId, ['gateway_id' => $gatewayId, 'provider' => $gateway['provider'], 'reason' => $e->getMessage()]);
+            notify_admins(
+                $pdo,
+                'gateway',
+                "{$gateway['display_name']} — could not confirm order creation",
+                'A payin request timed out or failed at the network level before this gateway confirmed it. Source: connectivity (not a definite provider or application error).'
+            );
             $message = 'PayIn created, but we could not confirm the payment gateway accepted it yet. This will update automatically once confirmed.';
         } catch (Throwable $e) {
-            // A definite, synchronous rejection — safe to unwind.
+            // A definite, synchronous rejection — safe to unwind. Three
+            // distinct causes share this one unwind path (rollback the
+            // reservation, mark failed, notify the customer webhook) but
+            // need different admin-facing labeling — see the branches below.
             $isCustomerActionable = $e instanceof GatewayCustomerActionRequiredException;
+            $isConfigError = $e instanceof GatewayConfigurationException;
 
             error_log('[create_payin] gateway order failed: ' . $e->getMessage());
             write_audit_log($merchant['id'], 'payin_gateway_order_failed', 'transaction', $txnId, ['gateway_id' => $gatewayId, 'provider' => $gateway['provider'], 'reason' => $e->getMessage()]);
+            // Excludes GatewayCustomerActionRequiredException on purpose —
+            // that's the merchant's end-customer missing a phone number or
+            // similar, not a gateway health problem admins need to see.
+            if (!$isCustomerActionable) {
+                $reason = mb_substr($e->getMessage(), 0, 120);
+                notify_admins(
+                    $pdo,
+                    'gateway',
+                    $isConfigError ? "{$gateway['display_name']} — secret/key configuration error" : "{$gateway['display_name']} rejected a payin",
+                    $isConfigError
+                        ? "This payin could not reach the gateway because its stored credentials could not be decrypted: {$reason} Source: our application (configuration)."
+                        : "The gateway declined to create this order: {$reason} Source: payment gateway."
+                );
+            }
 
             $pdo->beginTransaction();
             try {
@@ -210,13 +270,18 @@ function create_payin(PDO $pdo, array $merchant, array $input, bool $sandboxOnly
             return [
                 'ok' => false,
                 'status_code' => $isCustomerActionable ? 422 : 502,
-                'message' => $isCustomerActionable ? $e->getMessage() : 'This payin could not be started — the payment gateway rejected the request. Please try again.',
+                'message' => $isCustomerActionable
+                    ? $e->getMessage()
+                    : ($isConfigError
+                        ? 'This payin could not be started due to a platform configuration issue. Please try again shortly.'
+                        : 'This payin could not be started — the payment gateway rejected the request. Please try again.'),
                 'data' => ['reference' => $reference, 'merchant_order_id' => $merchantOrderId],
             ];
         }
-    } else {
-        // No live gateway configured — the instant-success dev/sandbox path
-        // (also what the API docs' "Try it" tester exercises). Resolved
+    } elseif ($isMockGateway) {
+        // Explicitly admin-flagged mock/test gateway — the instant-success
+        // dev/sandbox path (also what the API docs' "Try it" tester
+        // exercises, via a gateway that's always sandbox_mode). Resolved
         // through the exact same apply_transaction_outcome() a real webhook
         // would use, so it gets a real timeline entry, gateway-outcome
         // recording, and a settlement notification instead of being
@@ -244,6 +309,49 @@ function create_payin(PDO $pdo, array $merchant, array $input, bool $sandboxOnly
             $pdo->rollBack();
             error_log('[create_payin] failed to auto-settle sandbox payin: ' . $e->getMessage());
         }
+    } else {
+        // A real provider (razorpay/cashfree) was selected but isn't fully
+        // configured for live payments (missing/invalid credentials) and is
+        // NOT flagged is_mock — a genuine admin configuration problem. This
+        // must never be silently treated as a mock success (that would mask
+        // a real misconfiguration as a working payment) — unwind exactly
+        // like a definite synchronous gateway rejection below does.
+        error_log("[create_payin] gateway {$gatewayId} ({$gateway['provider']}) selected but not live-configured and not flagged is_mock");
+        write_audit_log($merchant['id'], 'payin_gateway_misconfigured', 'transaction', $txnId, ['gateway_id' => $gatewayId, 'provider' => $gateway['provider']]);
+        notify_admins(
+            $pdo,
+            'gateway',
+            "{$gateway['display_name']} is misconfigured",
+            "This gateway was selected for a payin but has no usable live {$gateway['provider']} credentials, and isn't flagged as a mock/test gateway. Source: our application (configuration)."
+        );
+
+        $pdo->beginTransaction();
+        try {
+            $txnLock = $pdo->prepare(
+                'SELECT id, user_id, type, status, amount, fee, net_amount, currency, reference, gateway_id, merchant_order_id, end_customer_name, end_customer_email, end_customer_phone
+                 FROM transactions WHERE id = ? FOR UPDATE'
+            );
+            $txnLock->execute([$txnId]);
+            $txnRow = $txnLock->fetch();
+            if ($txnRow && $txnRow['status'] === 'pending') {
+                apply_transaction_outcome($pdo, $txnRow, 'failed', null);
+                release_gateway_reservation($pdo, $gatewayId, $amount);
+                $pdo->commit();
+                dispatch_customer_transaction_webhook($pdo, array_merge($txnRow, ['status' => 'failed']));
+            } else {
+                $pdo->commit();
+            }
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            error_log('[create_payin] failed to unwind misconfigured-gateway payin: ' . $e->getMessage());
+        }
+
+        return [
+            'ok' => false,
+            'status_code' => 503,
+            'message' => 'PayIns are temporarily unavailable. Please try again shortly.',
+            'data' => ['reference' => $reference, 'merchant_order_id' => $merchantOrderId],
+        ];
     }
 
     return [

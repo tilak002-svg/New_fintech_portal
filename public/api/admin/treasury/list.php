@@ -33,6 +33,14 @@ if (!empty($_GET['search'])) {
     $where[] = '(ledger.reference LIKE :search1 OR ledger.merchant_name LIKE :search2 OR ledger.merchant_email LIKE :search3)';
     $params['search1'] = $params['search2'] = $params['search3'] = $needle;
 }
+// Filters to a specific configured gateway instance (not just a provider
+// type — an operator may run more than one gateway account for the same
+// provider). Deliberately not restricted to currently-active gateways so a
+// retired/deactivated gateway's historical transactions stay filterable.
+if (ctype_digit((string) ($_GET['gateway_id'] ?? ''))) {
+    $where[] = 'ledger.gateway_id = :gateway_id';
+    $params['gateway_id'] = (int) $_GET['gateway_id'];
+}
 
 $whereSql = implode(' AND ', $where);
 
@@ -45,10 +53,12 @@ $baseSql = "
     SELECT
         t.id, t.type, t.method, t.amount, t.status, t.reference, t.created_at,
         u.name AS merchant_name, u.email AS merchant_email,
+        pg.id AS gateway_id, pg.display_name AS gateway_name, pg.provider AS gateway_provider,
         SUM(CASE WHEN t.status = 'success' THEN (CASE WHEN t.type = 'deposit' THEN t.net_amount ELSE -t.net_amount END) ELSE 0 END)
             OVER (ORDER BY t.created_at ASC, t.id ASC) AS running_balance
     FROM transactions t
     JOIN users u ON u.id = t.user_id
+    LEFT JOIN payment_gateways pg ON pg.id = t.gateway_id
 ";
 
 $listSql = "SELECT * FROM ({$baseSql}) ledger WHERE {$whereSql} ORDER BY ledger.created_at DESC, ledger.id DESC LIMIT :limit OFFSET :offset";

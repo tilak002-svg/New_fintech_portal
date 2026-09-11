@@ -14,6 +14,50 @@
     }
     window.Verapay.formatMoney = formatMoney;
 
+    /**
+     * Every timestamp the API returns is UTC, formatted as MySQL's plain
+     * "YYYY-MM-DD HH:MM:SS" (no timezone marker). A bare `new Date(value)`
+     * on that string is silently mis-parsed by JS as already being in the
+     * VIEWER'S OWN local time — so `.toLocaleString()` on it just echoes
+     * the UTC clock digits back, understating the real local time by
+     * whatever the viewer's UTC offset is (e.g. showing 11:45 AM for a
+     * payment that actually happened at 5:15 PM IST). This makes a
+     * MySQL-shaped string explicitly UTC before handing it to Date, so
+     * every .toLocaleString()/.toLocaleDateString() call downstream
+     * converts correctly. Pass-through for values that already carry an
+     * explicit offset (Z, +00:00, etc.) or are already a Date.
+     */
+    function toLocalDate(value) {
+        if (!value) return null;
+        if (value instanceof Date) return value;
+        const hasOffset = /Z$|[+-]\d{2}:?\d{2}$/.test(value);
+        return new Date(hasOffset ? value : value.replace(' ', 'T') + 'Z');
+    }
+    window.Verapay.toLocalDate = toLocalDate;
+
+    /**
+     * Formats a server timestamp as India time (Asia/Kolkata, UTC+5:30),
+     * explicitly — not whatever timezone the viewer's own device happens to
+     * be set to. This platform operates in India, so every viewer should
+     * read the same IST clock time for a given event. extraOptions merges
+     * over the IST-forcing base (e.g. { month: 'short', day: 'numeric' }
+     * for a shorter format than the full date+time default).
+     */
+    function formatIST(value, extraOptions = {}) {
+        const date = toLocalDate(value);
+        if (!date) return '';
+        return date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', ...extraOptions });
+    }
+    window.Verapay.formatIST = formatIST;
+
+    /** Date-only India-time formatting (no time-of-day component). */
+    function formatISTDate(value) {
+        const date = toLocalDate(value);
+        if (!date) return '';
+        return date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
+    }
+    window.Verapay.formatISTDate = formatISTDate;
+
     /** Wrapper around fetch() that always sends the CSRF header and parses JSON. */
     async function apiFetch(url, options = {}) {
         const opts = Object.assign({ headers: {} }, options);
@@ -259,8 +303,8 @@
             tdRow('Fee', formatMoney(t.fee, t.currency)),
             tdRow('Net amount', formatMoney(t.net_amount, t.currency)),
             tdRow('Currency', escapeHtml(t.currency)),
-            tdRow('Created', new Date(t.created_at).toLocaleString()),
-            tdRow('Updated', new Date(t.updated_at).toLocaleString()),
+            tdRow('Created', formatIST(t.created_at)),
+            tdRow('Updated', formatIST(t.updated_at)),
         ]);
 
         const gatewayInfo = tdSection('Gateway information', [
@@ -268,7 +312,7 @@
             tdRow('Provider', t.gateway_provider ? escapeHtml(t.gateway_provider) : ''),
             tdRow('Mode', t.gateway_name ? `<span class="badge-neutral">${t.gateway_sandbox_mode == 1 ? 'Sandbox' : 'Live'}</span>` : ''),
             tdRow('Gateway transaction ID', t.gateway_txn_id ? `<span class="font-mono">${escapeHtml(t.gateway_txn_id)}</span>` : ''),
-            tdRow('Checkout session', t.session_status ? `${escapeHtml(t.session_status)}${t.session_expires_at ? ' · expires ' + new Date(t.session_expires_at).toLocaleString() : ''}` : ''),
+            tdRow('Checkout session', t.session_status ? `${escapeHtml(t.session_status)}${t.session_expires_at ? ' · expires ' + formatIST(t.session_expires_at) : ''}` : ''),
         ]);
 
         const merchantInfo = (isStaffViewer && t.user_name) ? tdSection('Merchant', [
@@ -302,7 +346,7 @@
             tdRow('Callback URL', cb.url ? `<span class="font-mono text-xs break-all">${escapeHtml(cb.url)}</span>` : 'Not configured'),
             tdRow('Delivery status', callbackStatusBadge),
             cb.attempts ? tdRow('Attempts', String(cb.attempts)) : '',
-            cb.last_attempt_at ? tdRow('Last attempt', new Date(cb.last_attempt_at).toLocaleString()) : '',
+            cb.last_attempt_at ? tdRow('Last attempt', formatIST(cb.last_attempt_at)) : '',
             cb.failure_reason ? tdRow('Failure reason', escapeHtml(cb.failure_reason)) : '',
         ]);
 
@@ -315,7 +359,7 @@
                             <span class="w-2 h-2 rounded-full mt-1.5 shrink-0 ${timelineToneDot[ev.tone] || timelineToneDot.neutral}"></span>
                             <span class="flex-1">
                                 <span class="block text-sm text-text-primary">${escapeHtml(ev.label)}</span>
-                                <span class="block text-xs text-text-secondary mt-0.5">${new Date(ev.occurred_at).toLocaleString()}</span>
+                                <span class="block text-xs text-text-secondary mt-0.5">${formatIST(ev.occurred_at)}</span>
                             </span>
                         </li>`).join('')}
                 </ol>

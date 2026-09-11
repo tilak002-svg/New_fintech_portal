@@ -37,9 +37,9 @@
     </div>
 </dialog>
 
-<script src="/assets/js/app.js" defer></script>
+<script src="/assets/js/app.js?v=<?= e(ASSET_VERSION) ?>" defer></script>
 <?php if (!empty($extraScripts)): foreach ($extraScripts as $src): ?>
-<script src="<?= e($src) ?>" defer></script>
+<script src="<?= e($src) ?>?v=<?= e(ASSET_VERSION) ?>" defer></script>
 <?php endforeach; endif; ?>
 </body>
 </html>

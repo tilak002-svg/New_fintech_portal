@@ -1,6 +1,6 @@
 (function () {
     'use strict';
-    const { apiFetch, showToast, setButtonLoading, escapeHtml } = window.Verapay;
+    const { apiFetch, showToast, setButtonLoading, escapeHtml, formatIST, formatISTDate } = window.Verapay;
 
     const loadingEl = document.getElementById('api-access-loading');
     const contentEl = document.getElementById('api-access-content');
@@ -38,16 +38,22 @@
         });
     });
 
+    const ipBadgeClass = { pending: 'badge-warning', approved: 'badge-success', rejected: 'badge-danger' };
+    const ipBadgeLabel = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' };
+
     function renderWhitelistedIps(ips) {
         const list = document.getElementById('aa-whitelisted-ips');
         if (!ips.length) {
-            list.innerHTML = '<li class="text-sm text-text-secondary">No IPs whitelisted yet — contact support to add one before using your token.</li>';
+            list.innerHTML = '<li class="text-sm text-text-secondary">No IPs requested yet — submit one below.</li>';
             return;
         }
         list.innerHTML = ips.map((row) => `
             <li class="flex items-center justify-between gap-3 rounded-sm border border-border px-3 py-2">
-                <span class="font-mono text-sm text-text-primary">${escapeHtml(row.ip_address)}</span>
-                <span class="text-xs text-text-secondary">${new Date(row.created_at).toLocaleDateString()}</span>
+                <span class="flex items-center gap-2">
+                    <span class="font-mono text-sm text-text-primary">${escapeHtml(row.ip_address)}</span>
+                    <span class="${ipBadgeClass[row.status] || 'badge-neutral'} !text-xs">${ipBadgeLabel[row.status] || row.status}</span>
+                </span>
+                <span class="text-xs text-text-secondary">${formatISTDate(row.created_at)}</span>
             </li>`).join('');
     }
 
@@ -68,7 +74,7 @@
         }
         document.getElementById('aa-bearer-token').value = data.bearer_token || '';
         document.getElementById('aa-token-meta').textContent = data.bearer_token_generated_at
-            ? `Generated ${new Date(data.bearer_token_generated_at).toLocaleString()}`
+            ? `Generated ${formatIST(data.bearer_token_generated_at)}`
             : 'No token generated yet.';
         document.getElementById('aa-payout-url').value = data.payout_callback_url || '';
         document.getElementById('aa-payin-url').value = data.payin_callback_url || '';
@@ -139,6 +145,36 @@
             return;
         }
         showToast('Webhook configuration saved.', 'success');
+    });
+
+    document.getElementById('aa-ip-request').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const input = document.getElementById('aa-ip-new');
+        const errorEl = document.getElementById('aa-ip-error');
+        errorEl.classList.add('hidden');
+
+        if (!input.value.trim()) {
+            errorEl.textContent = 'Enter an IP address first.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+
+        setButtonLoading(btn, true);
+        const { success, message } = await apiFetch('/api/settings/request-api-ip.php', {
+            method: 'POST',
+            body: { ip_address: input.value.trim() },
+        });
+        setButtonLoading(btn, false);
+
+        if (!success) {
+            errorEl.textContent = message || 'Unable to submit that request.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+
+        input.value = '';
+        showToast(message || 'Request submitted.', 'success');
+        loadApiAccess();
     });
 
     loadApiAccess();

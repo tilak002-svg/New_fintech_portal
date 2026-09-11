@@ -24,6 +24,14 @@ render_hero_banner(
             <label for="f-search" class="field-label"><?= icon('search', 'w-3.5 h-3.5 inline -mt-0.5 mr-1') ?><?= $isOperator ? 'Search reference, customer or email' : 'Search reference' ?></label>
             <input type="search" id="f-search" name="search" class="field-input" placeholder="<?= $isOperator ? 'DX-A1B2, Priya, priya@…' : 'DX-A1B2C3D4' ?>">
         </div>
+        <?php if ($isOperator): ?>
+        <div>
+            <label for="f-customer" class="field-label">Customer</label>
+            <select id="f-customer" name="user_id" class="field-input">
+                <option value="">All customers</option>
+            </select>
+        </div>
+        <?php endif; ?>
         <div>
             <label for="f-status" class="field-label">Status</label>
             <select id="f-status" name="status" class="field-input">

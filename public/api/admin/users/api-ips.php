@@ -37,10 +37,12 @@ $credStmt->execute([$userId]);
 $creds = $credStmt->fetch();
 
 $ipsStmt = $pdo->prepare(
-    'SELECT cwi.id, cwi.ip_address, cwi.created_at, u.name AS added_by_name
+    "SELECT cwi.id, cwi.ip_address, cwi.status, cwi.created_at, cwi.updated_at, cwi.reviewed_at,
+            u.name AS added_by_name, ru.name AS reviewed_by_name
      FROM customer_whitelisted_ips cwi
      LEFT JOIN users u ON u.id = cwi.added_by
-     WHERE cwi.user_id = ? ORDER BY cwi.created_at ASC'
+     LEFT JOIN users ru ON ru.id = cwi.reviewed_by
+     WHERE cwi.user_id = ? ORDER BY (cwi.status = 'pending') DESC, cwi.created_at DESC"
 );
 $ipsStmt->execute([$userId]);
 

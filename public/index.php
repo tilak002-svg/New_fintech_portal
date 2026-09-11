@@ -24,6 +24,28 @@ if ($route === '') {
     $route = 'dashboard';
 }
 
+// Static asset fallback: the web server is expected to serve real files
+// under /public directly, before this front controller ever runs. On hosts
+// where that isn't happening (some shared-hosting rewrite configs), serve
+// them here instead of falling through to the 404 page below.
+if ($route !== '' && !str_ends_with($route, '.php')) {
+    $assetFile = __DIR__ . '/' . $route;
+    if (is_file($assetFile)) {
+        static $assetMimeTypes = [
+            'css' => 'text/css', 'js' => 'application/javascript',
+            'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif', 'svg' => 'image/svg+xml', 'ico' => 'image/x-icon',
+            'woff' => 'font/woff', 'woff2' => 'font/woff2', 'ttf' => 'font/ttf',
+            'json' => 'application/json', 'webp' => 'image/webp', 'map' => 'application/json',
+        ];
+        $ext = strtolower(pathinfo($assetFile, PATHINFO_EXTENSION));
+        header('Content-Type: ' . ($assetMimeTypes[$ext] ?? 'application/octet-stream'));
+        header('Cache-Control: public, max-age=86400');
+        readfile($assetFile);
+        exit;
+    }
+}
+
 // ---- Public routes (no authentication) ----
 if ($route === 'login') {
     if (!empty($_SESSION['user_id'])) {
@@ -56,7 +78,7 @@ if ($route === 'pay') {
 // this dispatch is a plain include, deliberately bypassing the HTML
 // header/footer/role-table below — these are JSON endpoints, not pages.
 if (str_starts_with($route, 'api/')) {
-    $apiFile = __DIR__ . '/' . $route . '.php';
+    $apiFile = __DIR__ . '/' . preg_replace('/\.php$/', '', $route) . '.php';
     if (is_file($apiFile)) {
         require $apiFile;
         exit;

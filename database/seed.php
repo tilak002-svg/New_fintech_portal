@@ -20,7 +20,8 @@ foreach ([
     'gateway_daily_usage', 'gateway_hourly_usage', 'gateway_monthly_usage', 'webhook_events',
     'payment_sessions', 'transactions', 'wallets', 'business_profiles', 'merchant_profiles',
     'settlement_banks', 'kyc_documents', 'customer_whitelisted_ips', 'customer_api_credentials',
-    'platform_whitelisted_ips', 'platform_api_settings', 'login_attempts', 'payment_gateways', 'users',
+    'platform_whitelisted_ips', 'platform_api_settings', 'login_attempts',
+    'merchant_gateway_assignments', 'payment_gateways', 'users',
 ] as $table) {
     $pdo->exec("TRUNCATE TABLE {$table}");
 }
@@ -85,6 +86,17 @@ try {
     foreach ($demoGateways as [$name, $provider, $last4, $status, $isDefault, $priority, $dailyLimit, $daysOffset]) {
         $insertGateway->execute([$name, $provider, $last4, password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT), $status, $isDefault, $priority, $dailyLimit, (clone $now)->modify($daysOffset)->format('Y-m-d H:i:s')]);
     }
+
+    // Grandfather every demo customer onto every active demo gateway (same
+    // rule production's migration21.sql applies to real merchants) so a
+    // fresh seed can exercise PayIn/PayOut routing immediately without a
+    // manual admin assignment pass first.
+    $pdo->exec(
+        "INSERT INTO merchant_gateway_assignments (user_id, gateway_id, priority, is_enabled)
+         SELECT u.id, pg.id, pg.priority, 1
+         FROM users u CROSS JOIN payment_gateways pg
+         WHERE u.role = 'customer' AND pg.status = 'active' AND (pg.payin_enabled = 1 OR pg.payout_enabled = 1)"
+    );
 
     // Obviously-fictional placeholder KYC data (repeated/sequential digits,
     // not a real assigned PAN/GSTIN/Aadhaar/account number for anyone).

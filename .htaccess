@@ -1,12 +1,24 @@
-# Defense in depth for hosts where the document root cannot be pointed at
-# /public: block direct access to everything except the public/ folder.
-# If your host lets you set the document root to /public directly, this
-# file is redundant but harmless.
-
 RewriteEngine On
-RewriteCond %{REQUEST_URI} !^/public/
-RewriteRule ^(config|includes|pages|database)/ - [F,L]
+RewriteBase /
 
-<FilesMatch "\.(env|sql|md)$">
+# Pass HTTP Authorization header through (needed for Bearer/API token auth)
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# Block direct access to internal application directories
+RewriteRule ^(config|includes|pages|database|storage|bootstrap)/ - [F,L]
+
+# Block sensitive files from direct download
+<FilesMatch "\.(env|sql|md|log|json|lock|git.*)$">
     Require all denied
 </FilesMatch>
+
+Options -Indexes
+
+# If the request maps to a real file/dir inside /public, serve it directly
+RewriteCond public%{REQUEST_URI} -f [OR]
+RewriteCond public%{REQUEST_URI} -d
+RewriteRule ^(.*)$ public/$1 [QSA,L]
+
+# Everything else goes through the front controller
+RewriteRule ^(.*)$ public/index.php [QSA,L]

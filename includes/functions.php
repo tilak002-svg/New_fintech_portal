@@ -291,11 +291,17 @@ function transaction_type_public_name(string $type): string
 /**
  * The API Base URL shown to every customer (Settings/API Access, API
  * documentation) — the single source every page must call instead of
- * inlining `rtrim(APP_URL, '/') . '/api/v1'`, so an admin's override
- * (Admin Dashboard → API Base URL → Edit) takes effect everywhere at
- * once. Falls back to the APP_URL-derived default when no override has
- * ever been saved, so this is safe to call before an admin has touched
- * the setting.
+ * inlining `rtrim(APP_URL, '/')`, so an admin's override (Admin
+ * Dashboard → API Base URL → Edit) takes effect everywhere at once.
+ * Falls back to the bare APP_URL when no override has ever been saved,
+ * so this is safe to call before an admin has touched the setting.
+ *
+ * This is the API ROOT — it deliberately does NOT include "/api/v1".
+ * Every endpoint path documented in pages/api-docs.php (e.g.
+ * "/api/v1/payins/create") already carries that prefix itself, so
+ * callers just concatenate base + path directly. (Previously this
+ * function appended "/api/v1" itself, which double-prefixed every
+ * generated curl example — see pages/api-docs.php's $endpoints paths.)
  */
 function platform_api_base_url(): string
 {
@@ -307,11 +313,60 @@ function platform_api_base_url(): string
     $stmt = db()->query('SELECT api_base_url FROM platform_settings WHERE id = 1');
     $override = $stmt ? $stmt->fetchColumn() : null;
 
-    $cached = $override ?: (rtrim(APP_URL, '/') . '/api/v1');
+    $cached = $override ?: rtrim(APP_URL, '/');
     return $cached;
 }
 
 function current_route(): string
 {
     return $_GET['route'] ?? 'dashboard';
+}
+
+/**
+ * Fans a notification out to every active admin/operator — the admin-facing
+ * counterpart to the many per-merchant `INSERT INTO notifications` call
+ * sites (deposit/withdrawal/support/security/kyc/chargeback), all of which
+ * target one known user_id. A gateway health/limit alert has no single
+ * "owner" the way a merchant's own transaction does; every admin and
+ * operator is the intended audience, same as Admin -> Payment gateways /
+ * Routing & switching already is. Reuses the existing notifications table
+ * and bell/Notifications-page UI as-is — no new table, no new UI.
+ *
+ * Throttled per (type, title) pair so a merchant retrying against a down
+ * gateway doesn't produce one notification per attempt — checked against
+ * ONE representative recipient rather than every recipient individually,
+ * since everyone in $recipients is notified together in the same call: if
+ * one of them is still inside the window, all of them are.
+ */
+function notify_admins(PDO $pdo, string $type, string $title, string $message, int $dedupeMinutes = 30): void
+{
+    $recipientsStmt = $pdo->prepare("SELECT id FROM users WHERE role IN ('admin', 'operator') AND status = 'active'");
+    $recipientsStmt->execute();
+    $recipients = $recipientsStmt->fetchAll(PDO::FETCH_COLUMN);
+    if (!$recipients) {
+        return;
+    }
+
+    if ($dedupeMinutes > 0) {
+        // Plain NOW(), matching notifications.created_at's own
+        // CURRENT_TIMESTAMP default — same convention already used by
+        // login_is_locked_out() in includes/auth.php for the same reason:
+        // both sides come from MySQL's own clock, so they stay consistent
+        // with each other regardless of what timezone that clock is in.
+        $dedupeStmt = $pdo->prepare(
+            'SELECT 1 FROM notifications
+             WHERE user_id = ? AND type = ? AND title = ?
+               AND created_at > (NOW() - INTERVAL ? MINUTE)
+             LIMIT 1'
+        );
+        $dedupeStmt->execute([$recipients[0], $type, $title, $dedupeMinutes]);
+        if ($dedupeStmt->fetchColumn()) {
+            return;
+        }
+    }
+
+    $insert = $pdo->prepare('INSERT INTO notifications (user_id, type, title, message) VALUES (?, ?, ?, ?)');
+    foreach ($recipients as $userId) {
+        $insert->execute([$userId, $type, $title, $message]);
+    }
 }

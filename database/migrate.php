@@ -175,6 +175,16 @@ if (!table_exists($pdo, 'chargebacks')) {
     $applied[] = 'migration19.sql (chargebacks, chargeback_events, wallet_ledger, wallets.receivable_balance)';
 }
 
+if (!column_exists($pdo, 'customer_whitelisted_ips', 'status')) {
+    run_sql_file($pdo, __DIR__ . '/migration20.sql');
+    $applied[] = 'migration20.sql (customer_whitelisted_ips.status/reviewed_by/reviewed_at/updated_at)';
+}
+
+if (!table_exists($pdo, 'merchant_gateway_assignments')) {
+    run_sql_file($pdo, __DIR__ . '/migration21.sql');
+    $applied[] = 'migration21.sql (merchant_gateway_assignments, grandfathered from existing gateways)';
+}
+
 if (empty($applied)) {
     echo "Database already up to date — nothing to migrate.\n";
 } else {

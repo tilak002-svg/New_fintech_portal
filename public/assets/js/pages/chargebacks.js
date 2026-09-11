@@ -1,6 +1,6 @@
 (function () {
     'use strict';
-    const { apiFetch, escapeHtml, formatMoney: money, openModal, closeModal } = window.Verapay;
+    const { apiFetch, escapeHtml, formatMoney: money, openModal, closeModal, formatIST } = window.Verapay;
 
     const form = document.getElementById('filters-form');
     const tbody = document.getElementById('cb-tbody');
@@ -66,7 +66,7 @@
                 <td class="table-amount">${money(cb.amount, cb.currency)}</td>
                 <td class="table-amount">${money(cb.fee, cb.currency)}</td>
                 <td><span class="${statusBadgeClass(cb.status)}">${escapeHtml(cb.status)}</span></td>
-                <td class="text-text-secondary whitespace-nowrap">${new Date(cb.created_at).toLocaleString()}</td>
+                <td class="text-text-secondary whitespace-nowrap">${formatIST(cb.created_at)}</td>
                 <td><button type="button" class="btn-icon" data-view-cb="${cb.id}" aria-label="View chargeback details"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.75"/></svg></button></td>
             </tr>`).join('');
 
@@ -108,8 +108,8 @@
                 <div><p class="field-label">Total impact</p><p class="font-semibold">${money(cb.total_amount, cb.currency)}</p></div>
                 <div><p class="field-label">Gateway</p><p>${escapeHtml(cb.gateway_name || '—')}</p></div>
                 <div><p class="field-label">Reason</p><p>${escapeHtml(cb.reason || '—')}</p></div>
-                <div><p class="field-label">Due date</p><p>${cb.due_at ? new Date(cb.due_at).toLocaleString() : '—'}</p></div>
-                <div><p class="field-label">Resolved</p><p>${cb.resolved_at ? new Date(cb.resolved_at).toLocaleString() : '—'}</p></div>
+                <div><p class="field-label">Due date</p><p>${cb.due_at ? formatIST(cb.due_at) : '—'}</p></div>
+                <div><p class="field-label">Resolved</p><p>${cb.resolved_at ? formatIST(cb.resolved_at) : '—'}</p></div>
                 <div><p class="field-label">Resolution</p><p>${escapeHtml(cb.resolution || '—')}</p></div>
             </div>
             <div>
@@ -118,7 +118,7 @@
                     ${data.timeline.map((ev) => `
                         <li class="flex items-center gap-2 text-sm">
                             <span class="${statusBadgeClass(ev.status)}">${escapeHtml(ev.status)}</span>
-                            <span class="text-text-secondary">${ev.occurred_at ? new Date(ev.occurred_at).toLocaleString() : '—'}</span>
+                            <span class="text-text-secondary">${ev.occurred_at ? formatIST(ev.occurred_at) : '—'}</span>
                             ${!ev.applied ? '<span class="text-text-secondary italic">(not applied)</span>' : ''}
                         </li>
                     `).join('') || '<li class="text-text-secondary text-sm">No events recorded yet.</li>'}

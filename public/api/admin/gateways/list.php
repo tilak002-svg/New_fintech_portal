@@ -64,7 +64,15 @@ foreach ($gateways as &$gateway) {
     $gateway['live_payout'] = gateway_supports_live_payout($liveCheckRow);
     unset($gateway['has_live_secret'], $gateway['payout_account_number']);
     $webhookPath = $providerWebhookPaths[$gateway['provider']] ?? 'gateway.php';
-    $gateway['webhook_url'] = APP_URL . "/api/webhooks/{$webhookPath}?gateway_id={$gateway['id']}";
+    // Deliberately APP_URL (the real, fixed server address), NOT
+    // platform_api_base_url() — unlike payment_url (customer-facing,
+    // meant to follow a custom/branded Base URL override), this is what a
+    // provider calls back on after a payment. If an admin ever sets a
+    // broken or not-yet-DNS-connected Base URL override, this keeps the
+    // critical, invisible-to-anyone server-to-server webhook path anchored
+    // to the domain that's actually guaranteed to resolve, rather than
+    // silently breaking every future transaction until someone notices.
+    $gateway['webhook_url'] = rtrim(APP_URL, '/') . "/api/webhooks/{$webhookPath}?gateway_id={$gateway['id']}";
 }
 unset($gateway);
 

@@ -114,6 +114,28 @@ CREATE TABLE payment_gateways (
     KEY idx_payment_gateways_priority (status, priority)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Merchant-wise gateway assignment + per-merchant priority, distinct from
+-- payment_gateways.priority (the gateway's own default/fallback ordering,
+-- pre-filled when admin assigns it to a new merchant, and still what
+-- drives the "Manage Gateways" list's own display order). Deliberately not
+-- payin/payout-specific (no `direction` column) so payout routing can read
+-- the same table without a new one. Fails closed: a merchant with zero (or
+-- zero enabled) rows here gets 'no_assigned_gateways' from
+-- select_and_reserve_gateway() and cannot create a PayIn/PayOut.
+CREATE TABLE merchant_gateway_assignments (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id INT UNSIGNED NOT NULL,
+    gateway_id INT UNSIGNED NOT NULL,
+    priority INT UNSIGNED NOT NULL DEFAULT 100,
+    is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_merchant_gateway (user_id, gateway_id),
+    KEY idx_merchant_gateway_priority (user_id, is_enabled, priority),
+    CONSTRAINT fk_mga_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_mga_gateway FOREIGN KEY (gateway_id) REFERENCES payment_gateways(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE transactions (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id INT UNSIGNED NOT NULL,
@@ -400,15 +422,29 @@ CREATE TABLE customer_api_credentials (
 -- whitelist would let an attacker open API access from a new location
 -- with nothing else required. Requiring an admin action here means account
 -- takeover alone can't silently expand where a stolen bearer token works.
+-- Customer-requested, admin-approved. A customer submits an IP here
+-- (status='pending'); only an admin decision (approve/reject) makes it
+-- usable by the bearer-token IP gate (includes/auth.php,
+-- public/api/auth/api-token.php), which requires status='approved'. A
+-- missing row and a 'pending'/'rejected' row are treated identically by
+-- that gate (fail closed either way). added_by is the legacy admin who
+-- added an entry under the old direct-add flow (NULL for self-requested
+-- rows); reviewed_by is who approved/rejected it.
 CREATE TABLE customer_whitelisted_ips (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id INT UNSIGNED NOT NULL,
     ip_address VARCHAR(45) NOT NULL,
+    status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
     added_by INT UNSIGNED NULL,
+    reviewed_by INT UNSIGNED NULL,
+    reviewed_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_customer_whitelisted_ips (user_id, ip_address),
+    KEY idx_customer_whitelisted_ips_user_status (user_id, status),
     CONSTRAINT fk_customer_whitelisted_ips_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT fk_customer_whitelisted_ips_admin FOREIGN KEY (added_by) REFERENCES users(id) ON DELETE SET NULL
+    CONSTRAINT fk_customer_whitelisted_ips_admin FOREIGN KEY (added_by) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_customer_whitelisted_ips_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE platform_whitelisted_ips (
@@ -429,7 +465,7 @@ CREATE TABLE platform_whitelisted_ips (
 -- Single admin-editable override for the API Base URL shown to every
 -- customer (Settings/API Access, API documentation). NULL api_base_url
 -- means "no override configured yet" — every reader falls back to
--- APP_URL + /api/v1 (see includes/functions.php's platform_api_base_url()).
+-- bare APP_URL (see includes/functions.php's platform_api_base_url()).
 CREATE TABLE platform_settings (
     id TINYINT UNSIGNED PRIMARY KEY DEFAULT 1,
     api_base_url VARCHAR(255) NULL,

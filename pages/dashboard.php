@@ -139,26 +139,63 @@ function render_report_cards(string $prefix, string $type, array $meta): void {
         </a>
     </div>
 
-    <!-- Gateway health -->
+    <!-- Gateway analytics — same trend-chart treatment as Deposit/Withdrawal
+         analytics below, scoped to one gateway at a time via the dropdown.
+         Defaults to the highest-priority gateway on load (see
+         initGatewayAnalytics in dashboard.js) rather than sitting empty;
+         the "all gateways at once" companion view (settled-amount share
+         donut) sits alongside it and isn't tied to the dropdown at all. -->
     <div class="card mb-6">
-        <div class="flex items-center justify-between mb-4">
-            <h2 class="card-title">Gateway health</h2>
-            <a href="/admin/routing" class="text-sm font-medium text-brand hover:underline">Routing &amp; switching</a>
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div>
+                <h2 class="card-title mb-1">Gateway analytics</h2>
+                <p class="card-subtitle" id="gateway-analytics-subtitle">Successful settled amount, last 7 days</p>
+            </div>
+            <select id="gateway-analytics-select" class="field-input !w-auto">
+                <option value="">Select a gateway…</option>
+            </select>
         </div>
-        <div class="overflow-x-auto">
-            <table class="table-base" id="gateway-health-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Gateway</th>
-                        <th scope="col">Status</th>
-                        <th scope="col">Today's usage</th>
-                        <th scope="col">Success rate</th>
-                    </tr>
-                </thead>
-                <tbody id="gateway-health-tbody">
-                    <tr><td colspan="4" class="text-center py-6 text-text-secondary">Loading gateway health…</td></tr>
-                </tbody>
-            </table>
+        <!-- Reserves its box via `visibility:hidden` (not display:none) so
+             this row's own height counts before a gateway is ever selected
+             — otherwise the summary row appearing on first selection would
+             grow the card by its own height on top of the chart-area fix
+             below. Pre-filled with the same 3-stat markup selection later
+             overwrites, so the reserved height already matches exactly. -->
+        <div id="gateway-analytics-summary" class="flex items-center gap-6 pb-4 mb-4 border-b border-border" style="visibility:hidden">
+            <div>
+                <p class="text-sm text-text-secondary">Total transactions</p>
+                <p class="text-lg font-semibold text-text-primary">—</p>
+            </div>
+            <div class="pl-6 border-l border-border">
+                <p class="text-sm text-text-secondary">Success rate</p>
+                <p class="text-lg font-semibold text-text-primary">—</p>
+            </div>
+            <div class="pl-6 border-l border-border">
+                <p class="text-sm text-text-secondary">Settled amount</p>
+                <p class="text-lg font-semibold text-text-primary">—</p>
+            </div>
+        </div>
+        <div class="flex flex-col lg:flex-row gap-8">
+            <!-- w-[560px] caps the trend chart's rendered width
+                 (renderTrendChart scales height purely off its container's
+                 width, see charts.js), and min-h-[265px] reserves the same
+                 footprint it settles into once loaded — so this box is the
+                 same height whether empty or populated; switching gateways
+                 never reflows the page. Still wider/taller than a single
+                 Deposit/Withdrawal chart (~490px/~225px). -->
+            <div id="gateway-analytics-chart" class="w-full lg:w-[560px] lg:shrink-0 min-h-[265px]" aria-live="polite">
+                <div class="empty-state">
+                    <span class="empty-state-icon"><?= icon('gateway', 'w-6 h-6') ?></span>
+                    <p class="empty-state-title">Select a gateway</p>
+                    <p class="empty-state-body">Pick a gateway above to see its individual transaction summary.</p>
+                </div>
+            </div>
+            <!-- Fills the space the capped-width trend chart leaves on a
+                 full-width card — an "all gateways at once" share view,
+                 independent of the dropdown above. -->
+            <div id="gateway-analytics-share" class="flex-1 min-w-0 min-h-[265px]" aria-live="polite">
+                <div class="skeleton h-full w-full rounded-sm"></div>
+            </div>
         </div>
     </div>
 

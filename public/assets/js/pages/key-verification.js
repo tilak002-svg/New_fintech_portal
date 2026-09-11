@@ -1,6 +1,6 @@
 (function () {
     'use strict';
-    const { apiFetch, escapeHtml, setButtonLoading } = window.Verapay;
+    const { apiFetch, escapeHtml, setButtonLoading, showToast, formatIST } = window.Verapay;
 
     const btn = document.getElementById('kv-verify-btn');
     const statusCard = document.getElementById('kv-status-card');
@@ -11,6 +11,7 @@
     const failureDetail = document.getElementById('kv-failure-detail');
     const failureMessage = document.getElementById('kv-failure-message');
     const contactSupport = document.getElementById('kv-contact-support');
+    const requestIpBtn = document.getElementById('kv-request-ip-btn');
 
     const ICONS = {
         pending: '<svg class="w-5 h-5 text-text-secondary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/></svg>',
@@ -29,6 +30,8 @@
         ['client_key', 'secret_key', 'bearer_token', 'reachable', 'auth', 'ip', 'request'].forEach((c) => setCheck(c, 'pending'));
         failureDetail.classList.add('hidden');
         contactSupport.classList.add('hidden');
+        requestIpBtn.classList.add('hidden');
+        requestIpBtn.disabled = false;
     }
 
     function setStatus(kind, title, subtitle) {
@@ -53,7 +56,7 @@
     async function refreshLastVerified() {
         const { success, data } = await apiFetch('/api/settings/api-credentials.php');
         if (success && data.last_verified_at) {
-            statusMeta.textContent = 'Last verified: ' + new Date(data.last_verified_at).toLocaleString();
+            statusMeta.textContent = 'Last verified: ' + formatIST(data.last_verified_at);
         }
     }
 
@@ -111,7 +114,11 @@
             setCheck('auth', 'pass');
             setCheck('ip', 'fail');
             setCheck('request', 'fail');
-            showFailure('Your server IP address is not whitelisted for this account.\n\nYour IP: ' + body.data.ip + '\n\nContact your administrator to have this IP added.', true);
+            showFailure('Your server IP address is not whitelisted for this account.\n\nYour IP: ' + body.data.ip, true);
+            requestIpBtn.textContent = 'Request to whitelist ' + body.data.ip;
+            requestIpBtn.dataset.ip = body.data.ip;
+            requestIpBtn.disabled = false;
+            requestIpBtn.classList.remove('hidden');
         } else if (!res.ok || !body.success) {
             setCheck('auth', 'fail');
             setCheck('ip', 'fail');
@@ -128,6 +135,22 @@
 
         setButtonLoading(btn, false);
     }
+
+    requestIpBtn.addEventListener('click', async () => {
+        const ip = requestIpBtn.dataset.ip;
+        if (!ip) return;
+        requestIpBtn.disabled = true;
+        const { success, message } = await apiFetch('/api/settings/request-api-ip.php', {
+            method: 'POST',
+            body: { ip_address: ip },
+        });
+        if (!success) {
+            showToast(message || 'Unable to submit that request.', 'error');
+            requestIpBtn.disabled = false;
+            return;
+        }
+        showToast(message || 'Request submitted.', 'success');
+    });
 
     btn.addEventListener('click', runVerification);
     refreshLastVerified();

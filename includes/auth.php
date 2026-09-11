@@ -166,10 +166,11 @@ function verify_csrf(): void
  * checks the session path doesn't need: the token must exactly match what's
  * currently stored (so regenerating a token immediately invalidates the
  * old one, even though the old JWT itself wouldn't otherwise expire for
- * up to a year), and the caller's IP must be on that customer's
- * admin-managed whitelist — deliberately fails closed if none is
- * configured yet, see customer_whitelisted_ips in schema.sql for why
- * that whitelist is admin-owned rather than customer self-service.
+ * up to a year), and the caller's IP must have an APPROVED row on that
+ * customer's whitelist — customer-requested, admin-approved (see
+ * customer_whitelisted_ips in schema.sql) — deliberately fails closed if
+ * none is approved yet, whether because none was ever requested or
+ * because a request is still pending/was rejected.
  */
 function authenticate_via_bearer_token(string $token): array
 {
@@ -190,7 +191,7 @@ function authenticate_via_bearer_token(string $token): array
     }
 
     $ip = $_SERVER['REMOTE_ADDR'] ?? '';
-    $ipStmt = db()->prepare('SELECT 1 FROM customer_whitelisted_ips WHERE user_id = ? AND ip_address = ?');
+    $ipStmt = db()->prepare("SELECT 1 FROM customer_whitelisted_ips WHERE user_id = ? AND ip_address = ? AND status = 'approved'");
     $ipStmt->execute([$userId, $ip]);
     if (!$ipStmt->fetchColumn()) {
         write_audit_log($userId, 'api_request_blocked_ip', 'user', $userId, ['ip' => $ip]);

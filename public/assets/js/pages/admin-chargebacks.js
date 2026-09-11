@@ -1,6 +1,6 @@
 (function () {
     'use strict';
-    const { apiFetch, escapeHtml, formatMoney: money, openModal } = window.Verapay;
+    const { apiFetch, escapeHtml, formatMoney: money, openModal, formatIST } = window.Verapay;
 
     const form = document.getElementById('filters-form');
     const tbody = document.getElementById('cb-tbody');
@@ -73,7 +73,7 @@
                     <span class="block text-sm text-text-secondary">+${money(cb.fee, cb.currency)} fee</span>
                 </td>
                 <td><span class="${statusBadgeClass(cb.status)}">${escapeHtml(cb.status)}</span></td>
-                <td class="text-text-secondary whitespace-nowrap">${new Date(cb.created_at).toLocaleString()}</td>
+                <td class="text-text-secondary whitespace-nowrap">${formatIST(cb.created_at)}</td>
                 <td><button type="button" class="btn-icon" data-view-cb="${cb.id}" aria-label="View chargeback details"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.75"/></svg></button></td>
             </tr>`).join('');
 
@@ -117,9 +117,9 @@
                 <div><p class="field-label">Total impact</p><p class="font-semibold">${money(cb.total_amount, cb.currency)}</p></div>
                 <div><p class="field-label">Reason</p><p>${escapeHtml(cb.reason || '—')} <span class="text-text-secondary">${escapeHtml(cb.reason_code || '')}</span></p></div>
                 <div><p class="field-label">Provider status (raw)</p><p class="text-text-secondary">${escapeHtml(cb.provider_status || '—')}</p></div>
-                <div><p class="field-label">Financial impact applied</p><p>${cb.financial_impact_applied_at ? new Date(cb.financial_impact_applied_at).toLocaleString() : 'Not yet'}</p></div>
-                <div><p class="field-label">Due date</p><p>${cb.due_at ? new Date(cb.due_at).toLocaleString() : '—'}</p></div>
-                <div><p class="field-label">Resolved</p><p>${cb.resolved_at ? new Date(cb.resolved_at).toLocaleString() : '—'}</p></div>
+                <div><p class="field-label">Financial impact applied</p><p>${cb.financial_impact_applied_at ? formatIST(cb.financial_impact_applied_at) : 'Not yet'}</p></div>
+                <div><p class="field-label">Due date</p><p>${cb.due_at ? formatIST(cb.due_at) : '—'}</p></div>
+                <div><p class="field-label">Resolved</p><p>${cb.resolved_at ? formatIST(cb.resolved_at) : '—'}</p></div>
                 <div><p class="field-label">Resolution</p><p>${escapeHtml(cb.resolution || '—')}</p></div>
             </div>
 
@@ -129,7 +129,7 @@
                     ${data.timeline.map((ev) => `
                         <li class="flex items-center gap-2 text-sm flex-wrap">
                             <span class="${statusBadgeClass(ev.status)}">${escapeHtml(ev.status)}</span>
-                            <span class="text-text-secondary">${ev.occurred_at ? new Date(ev.occurred_at).toLocaleString() : '—'}</span>
+                            <span class="text-text-secondary">${ev.occurred_at ? formatIST(ev.occurred_at) : '—'}</span>
                             <span class="font-mono text-xs text-text-secondary">${escapeHtml(ev.event_type || '')}</span>
                             ${!ev.applied ? `<span class="badge-neutral">skipped${ev.skip_reason ? ': ' + escapeHtml(ev.skip_reason) : ''}</span>` : ''}
                         </li>
@@ -150,7 +150,7 @@
                                         <td class="table-amount ${l.amount < 0 ? 'text-danger' : 'text-success'}">${money(l.amount, cb.currency)}</td>
                                         <td class="table-amount">${money(l.available_balance_after, cb.currency)}</td>
                                         <td class="table-amount">${money(l.receivable_balance_after, cb.currency)}</td>
-                                        <td class="text-text-secondary whitespace-nowrap">${new Date(l.created_at).toLocaleString()}</td>
+                                        <td class="text-text-secondary whitespace-nowrap">${formatIST(l.created_at)}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -172,5 +172,16 @@
     });
     form.addEventListener('submit', (e) => { e.preventDefault(); load(1); });
 
+    async function loadCustomerFilter() {
+        const select = document.getElementById('f-customer');
+        if (!select) return;
+        const { success, data } = await apiFetch('/api/admin/users/customers-lite.php');
+        if (!success) return;
+        select.insertAdjacentHTML('beforeend', data.customers.map((c) =>
+            `<option value="${c.id}">${escapeHtml(c.name)} (${escapeHtml(c.email)})</option>`
+        ).join(''));
+    }
+
+    loadCustomerFilter();
     load(1);
 })();

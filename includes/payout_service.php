@@ -118,10 +118,21 @@ function create_payout(PDO $pdo, array $merchant, array $input, bool $sandboxOnl
         // Reserved against the net payout amount — Verapay's fee is
         // retained before the payout gateway ever sees the transfer, same
         // rule as withdrawal_service.php::create_withdrawal().
-        $selection = select_and_reserve_gateway($pdo, $net, $sandboxOnly, 'payout');
+        $selection = select_and_reserve_gateway($pdo, (int) $merchant['id'], $net, $sandboxOnly, 'payout');
         if ($selection['gateway'] === null) {
             $pdo->rollBack();
             write_audit_log($merchant['id'], 'payout_gateway_unavailable', 'transaction', null, ['amount' => $amount, 'merchant_order_id' => $merchantOrderId, 'reason' => $selection['reason']]);
+            if (!$sandboxOnly) {
+                $isNoCapacity = $selection['reason'] === 'no_eligible_gateway';
+                notify_admins(
+                    $pdo,
+                    'gateway',
+                    $isNoCapacity ? 'PayOut blocked: every gateway is paused or over its limit' : 'PayOut blocked: no active payment gateway',
+                    $isNoCapacity
+                        ? "A payout for {$net} INR could not be routed — every active gateway is either auto-paused or would exceed a configured daily/hourly/monthly/per-transaction limit. Source: limit reached."
+                        : 'A payout could not be routed — no payment gateway is active. Source: our application (configuration).'
+                );
+            }
             $message = $sandboxOnly
                 ? 'No sandbox-mode gateway is currently configured. Ask your platform admin to enable one for testing.'
                 : 'PayOuts are temporarily unavailable. Please try again shortly.';
@@ -129,6 +140,11 @@ function create_payout(PDO $pdo, array $merchant, array $input, bool $sandboxOnl
         }
         $gateway = $selection['gateway'];
         $gatewayId = (int) $gateway['id'];
+        // Distinct from gateway_supports_live_payout($gateway) below: a
+        // gateway an admin explicitly flagged as mock/test vs. a real
+        // razorpay/cashfree row that simply isn't fully configured yet —
+        // see the three-way branch further down.
+        $isMockGateway = !empty($gateway['is_mock']);
 
         $destination = $beneficiaryBankName . ' ••' . substr($beneficiaryAccountNumber, -4);
 
@@ -184,12 +200,30 @@ function create_payout(PDO $pdo, array $merchant, array $input, bool $sandboxOnl
             // — never auto-retry on a different gateway.
             error_log('[create_payout] gateway payout ambiguous: ' . $e->getMessage());
             write_audit_log($merchant['id'], 'payout_gateway_payout_ambiguous', 'transaction', $txnId, ['gateway_id' => $gatewayId, 'provider' => $gateway['provider'], 'reason' => $e->getMessage()]);
+            notify_admins(
+                $pdo,
+                'gateway',
+                "{$gateway['display_name']} — could not confirm payout creation",
+                'A payout request timed out or failed at the network level before this gateway confirmed it — money may or may not have moved. Source: connectivity (not a definite provider or application error).'
+            );
             $message = 'PayOut submitted, but we could not confirm the payment gateway accepted it yet. This will update automatically once confirmed.';
         } catch (Throwable $e) {
             $isCustomerActionable = $e instanceof GatewayCustomerActionRequiredException;
+            $isConfigError = $e instanceof GatewayConfigurationException;
 
             error_log('[create_payout] gateway payout failed: ' . $e->getMessage());
             write_audit_log($merchant['id'], 'payout_gateway_payout_failed', 'transaction', $txnId, ['gateway_id' => $gatewayId, 'provider' => $gateway['provider'], 'reason' => $e->getMessage()]);
+            if (!$isCustomerActionable) {
+                $reason = mb_substr($e->getMessage(), 0, 120);
+                notify_admins(
+                    $pdo,
+                    'gateway',
+                    $isConfigError ? "{$gateway['display_name']} — secret/key configuration error" : "{$gateway['display_name']} rejected a payout",
+                    $isConfigError
+                        ? "This payout could not reach the gateway because its stored credentials could not be decrypted: {$reason} Source: our application (configuration)."
+                        : "The gateway declined to create this payout: {$reason} Source: payment gateway."
+                );
+            }
 
             $pdo->beginTransaction();
             try {
@@ -215,12 +249,16 @@ function create_payout(PDO $pdo, array $merchant, array $input, bool $sandboxOnl
             return [
                 'ok' => false,
                 'status_code' => $isCustomerActionable ? 422 : 502,
-                'message' => $isCustomerActionable ? $e->getMessage() : 'This payout could not be started — the payment gateway rejected the request. Please try again.',
+                'message' => $isCustomerActionable
+                    ? $e->getMessage()
+                    : ($isConfigError
+                        ? 'This payout could not be started due to a platform configuration issue. Please try again shortly.'
+                        : 'This payout could not be started — the payment gateway rejected the request. Please try again.'),
                 'data' => ['reference' => $reference, 'merchant_order_id' => $merchantOrderId],
             ];
         }
-    } else {
-        // No live payout integration configured — the instant-success
+    } elseif ($isMockGateway) {
+        // Explicitly admin-flagged mock/test gateway — the instant-success
         // dev/sandbox path (mirrors create_payin()'s equivalent branch).
         // Without this, a sandbox-mode payout had no path to resolution at
         // all: no real gateway call was ever made, so no webhook could
@@ -247,6 +285,48 @@ function create_payout(PDO $pdo, array $merchant, array $input, bool $sandboxOnl
             $pdo->rollBack();
             error_log('[create_payout] failed to auto-settle sandbox payout: ' . $e->getMessage());
         }
+    } else {
+        // A real provider (razorpay/cashfree) was selected but isn't fully
+        // configured for live payouts (missing/invalid credentials) and is
+        // NOT flagged is_mock — a genuine admin configuration problem. Must
+        // never be silently treated as a mock success — unwind exactly like
+        // a definite synchronous gateway rejection above does.
+        error_log("[create_payout] gateway {$gatewayId} ({$gateway['provider']}) selected but not live-configured and not flagged is_mock");
+        write_audit_log($merchant['id'], 'payout_gateway_misconfigured', 'transaction', $txnId, ['gateway_id' => $gatewayId, 'provider' => $gateway['provider']]);
+        notify_admins(
+            $pdo,
+            'gateway',
+            "{$gateway['display_name']} is misconfigured",
+            "This gateway was selected for a payout but has no usable live {$gateway['provider']} credentials, and isn't flagged as a mock/test gateway. Source: our application (configuration)."
+        );
+
+        $pdo->beginTransaction();
+        try {
+            $txnLock = $pdo->prepare(
+                'SELECT id, user_id, type, status, amount, fee, net_amount, currency, reference, gateway_id, merchant_order_id, beneficiary_name, beneficiary_account_number, beneficiary_ifsc, beneficiary_bank_name
+                 FROM transactions WHERE id = ? FOR UPDATE'
+            );
+            $txnLock->execute([$txnId]);
+            $txnRow = $txnLock->fetch();
+            if ($txnRow && $txnRow['status'] === 'pending') {
+                apply_transaction_outcome($pdo, $txnRow, 'failed', null);
+                release_gateway_reservation($pdo, $gatewayId, $net);
+                $pdo->commit();
+                dispatch_customer_transaction_webhook($pdo, array_merge($txnRow, ['status' => 'failed']));
+            } else {
+                $pdo->commit();
+            }
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            error_log('[create_payout] failed to unwind misconfigured-gateway payout: ' . $e->getMessage());
+        }
+
+        return [
+            'ok' => false,
+            'status_code' => 503,
+            'message' => 'PayOuts are temporarily unavailable. Please try again shortly.',
+            'data' => ['reference' => $reference, 'merchant_order_id' => $merchantOrderId],
+        ];
     }
 
     return [

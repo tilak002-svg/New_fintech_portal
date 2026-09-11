@@ -17,12 +17,19 @@ if ($id <= 0) {
 }
 
 $pdo = db();
-$stmt = $pdo->prepare('SELECT id, user_id, ip_address FROM customer_whitelisted_ips WHERE id = ?');
+$stmt = $pdo->prepare('SELECT id, user_id, ip_address, status FROM customer_whitelisted_ips WHERE id = ?');
 $stmt->execute([$id]);
 $entry = $stmt->fetch();
 
 if (!$entry) {
     json_response(false, null, 'That whitelist entry no longer exists.', 404);
+}
+// Revoke only applies to already-approved entries - pending/rejected rows
+// are handled by approve-api-ip.php / reject-api-ip.php instead, so a
+// stale UI reference (e.g. two admin tabs open) can't hit this path on a
+// row that changed status in between.
+if ($entry['status'] !== 'approved') {
+    json_response(false, null, 'Only approved entries can be revoked.', 422);
 }
 
 $pdo->prepare('DELETE FROM customer_whitelisted_ips WHERE id = ?')->execute([$id]);

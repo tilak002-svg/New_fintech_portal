@@ -13,6 +13,12 @@ render_hero_banner($user, 'PayOuts', 'Merchant-API-driven payouts sent across th
             <input type="search" id="f-search" name="search" class="field-input" placeholder="WX-A1B2, ORD-1001, Acme Co…">
         </div>
         <div>
+            <label for="f-customer" class="field-label">Customer</label>
+            <select id="f-customer" name="user_id" class="field-input">
+                <option value="">All customers</option>
+            </select>
+        </div>
+        <div>
             <label for="f-status" class="field-label">Status</label>
             <select id="f-status" name="status" class="field-input">
                 <option value="" <?= $initialStatus === '' ? 'selected' : '' ?>>All statuses</option>
@@ -31,6 +37,26 @@ render_hero_banner($user, 'PayOuts', 'Merchant-API-driven payouts sent across th
                 <option value="amount_desc">Amount: high to low</option>
                 <option value="amount_asc">Amount: low to high</option>
             </select>
+        </div>
+        <div>
+            <label for="f-provider" class="field-label">Provider</label>
+            <select id="f-provider" name="provider" class="field-input">
+                <option value="">All providers</option>
+                <option value="cashfree">Cashfree</option>
+                <option value="razorpay">Razorpay</option>
+                <option value="payu">PayU</option>
+                <option value="stripe">Stripe</option>
+                <option value="paypal">PayPal</option>
+                <option value="other">Other</option>
+            </select>
+        </div>
+        <div>
+            <label for="f-from" class="field-label">From</label>
+            <input type="date" id="f-from" name="from" class="field-input">
+        </div>
+        <div>
+            <label for="f-to" class="field-label">To</label>
+            <input type="date" id="f-to" name="to" class="field-input">
         </div>
     </form>
 </div>

@@ -94,8 +94,13 @@ render_hero_banner($user, 'API Access', 'Connect your website or application to 
             <span class="icon-chip-md icon-chip-brand"><?= icon('shield', 'w-4 h-4') ?></span>
             <h2 class="card-title">Whitelisted IPs</h2>
         </div>
-        <p class="card-subtitle mb-4">Only requests from these addresses can use your token — <strong class="text-text-primary">managed by Verapay support</strong>, not self-service, so a compromised login alone can't open API access from a new location. Contact support to add or change one.</p>
-        <ul id="aa-whitelisted-ips" class="space-y-1.5"></ul>
+        <p class="card-subtitle mb-4">Only requests from approved addresses can use your token. Submit a request below — Verapay support reviews and approves or rejects it.</p>
+        <ul id="aa-whitelisted-ips" class="space-y-1.5 mb-4"></ul>
+        <div class="flex flex-col sm:flex-row gap-3">
+            <input type="text" id="aa-ip-new" class="field-input flex-1" placeholder="e.g. 13.203.91.156">
+            <button type="button" id="aa-ip-request" class="btn-secondary shrink-0"><?= icon('plus', 'w-4 h-4') ?> Request IP</button>
+        </div>
+        <p id="aa-ip-error" class="field-error hidden mt-2"></p>
     </div>
 
     <div class="card">

@@ -23,17 +23,18 @@ unset($g);
 <?php render_hero_banner(
     $user,
     'Routing & switching',
-    'How a new PayIn/PayOut picks a gateway — the exact order Verapay tries them in, right now.'
+    'How a PayIn/PayOut picks a gateway — the default order below, before each merchant\'s own assignment narrows it.'
 ); ?>
 
 <div class="card mb-5">
     <h2 class="card-title mb-3">How this works</h2>
     <ol class="space-y-2 text-md text-text-secondary list-decimal pl-5">
-        <li>Every active, non-paused gateway below is tried in order, top to bottom.</li>
-        <li>A gateway is skipped if the transaction exceeds its per-transaction limit, or would push its hourly, daily, or monthly usage over its configured limit.</li>
-        <li>The first gateway that fits is used — no manual intervention needed when one gateway is busy or temporarily unavailable.</li>
-        <li>A gateway that fails 3 confirmed transactions in a row is automatically paused for 15 minutes and skipped until then, regardless of its priority.</li>
-        <li>Change the order or limits from <a href="/admin/gateways" class="text-brand-emphasis underline">Payment gateways</a> — this page is a view only.</li>
+        <li>Each merchant is only ever routed through gateways an admin has explicitly assigned them (<a href="/admin/users" class="text-brand-emphasis underline">Users → Gateways</a>) — a merchant with nothing assigned cannot create a PayIn/PayOut at all.</li>
+        <li>Within a merchant's assigned gateways, they're tried in <em>that merchant's own</em> priority order — the priority shown below is only each gateway's default/fallback order, used to pre-fill priority when a gateway is first assigned to a merchant.</li>
+        <li>A gateway is skipped if the transaction exceeds its per-transaction limit, or would push its hourly, daily, or monthly usage over its configured limit — these limits are shared platform-wide across every merchant using that gateway.</li>
+        <li>The first assigned gateway that fits is used — no manual intervention needed when one gateway is busy or temporarily unavailable.</li>
+        <li>A gateway that fails 3 confirmed transactions in a row is automatically paused for 15 minutes and skipped until then, regardless of priority.</li>
+        <li>Change a gateway's own config/limits from <a href="/admin/gateways" class="text-brand-emphasis underline">Payment gateways</a>, or a merchant's assignment/priority from <a href="/admin/users" class="text-brand-emphasis underline">Users</a> — this page is a view only.</li>
     </ol>
 </div>
 
